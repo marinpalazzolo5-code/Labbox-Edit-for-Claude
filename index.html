@@ -6965,6 +6965,34 @@ __e['save'] = save;
 <script src="entities/loader.js"></script>
 <script src="levels/loader.js"></script>
 <script>
+// Level studio preview: other/level-studio.html opens index.html#preview=<{ pack, source }>
+// (or leaves the same JSON in localStorage 'labbox.studio.preview' and opens #preview).
+// The level file is run through LabLevels.add like any other - replacing a level with
+// the same id - and the game goes straight into it once it has booted (see boot()).
+(function () {
+  var m = /^#preview(?:=(.*))?$/.exec(location.hash || '');
+  if (!m || !window.LabLevels) return;
+  try {
+    var raw = m[1] ? decodeURIComponent(m[1]) : null;
+    if (!raw) { try { raw = localStorage.getItem('labbox.studio.preview'); } catch (e) { raw = null; } }
+    if (!raw) throw new Error('nothing to preview - press Play preview in the level studio again');
+    var data = JSON.parse(raw), LL = window.LabLevels, got = null;
+    var realAdd = LL.add;
+    LL.add = function (folder, def) {
+      if (def && def.id) for (var f in LL.levels) LL.levels[f] = LL.levels[f].filter(function (d) { return d.id !== def.id; });
+      got = realAdd.call(LL, data.pack || folder, def);
+      return got;
+    };
+    try { new Function(String(data.source))(); } finally { LL.add = realAdd; }
+    if (!got || !got.id) throw new Error('the level file did not call LabLevels.add with a level that has an id');
+    window.__previewLevel = got.id;
+  } catch (e) {
+    console.error('[preview] ' + (e && e.message ? e.message : e));
+    window.__previewError = String(e && e.message ? e.message : e);
+  }
+})();
+</script>
+<script>
 (function () {
 'use strict';
 const __mod = window.__mod;
@@ -8443,12 +8471,12 @@ class EntityManager {
    * Returns how many floors lie between it and the player.
    */
   floorOf(e, floors, pf, dt) {
-    if (e.floor === undefined) e.floor = pf;
+    if (e.floor === undefined) e.floor = floors.climb === false ? 0 : pf;
     if (!floors.slab(e.pos.x, e.pos.z, e.floor)) e.floor = floors.dropTo(e.pos.x, e.pos.z, e.floor);
     if (e.floor !== pf) {
       e.floorT = (e.floorT || 0) + dt;
       const pl = this.player;
-      if (e.floorT > 7 && floors.slab(e.pos.x, e.pos.z, pf) && !this.world.visible(pl.pos.x, pl.eyeY, pl.pos.z, e.pos.x, floors.y(pf) + 1.4, e.pos.z)) { e.floor = pf; e.floorT = 0; }
+      if (floors.climb !== false && e.floorT > 7 && floors.slab(e.pos.x, e.pos.z, pf) && !this.world.visible(pl.pos.x, pl.eyeY, pl.pos.z, e.pos.x, floors.y(pf) + 1.4, e.pos.z)) { e.floor = pf; e.floorT = 0; }
     } else e.floorT = 0;
     e.fy = floors.y(e.floor);
     return Math.abs(e.floor - pf);
@@ -13526,6 +13554,7 @@ class Objectives {
   clear() {
     for (const g of this.goals) g.dispose();
     this.goals = [];
+    this.shortcut = null;
     this.clues = [];
     this.stages = [];
     if (this.game.world) this.game.world.cuts = [];
@@ -13618,6 +13647,18 @@ class Objectives {
         if (g) { g.text = text; g.title = def.clueTitle || 'A note'; st.clues.push(g); this.clues.push(g); }
       }
     });
+    // a level you can climb on top of has a way out up there: a roof hatch, the shortcut
+    const gp = this.world.gen && this.world.gen.params;
+    if (gp && gp.ceilingWalk && this.world.gen.floors) {
+      const fl = this.world.gen.floors, S = this.world.S;
+      for (let tries = 0; tries < 40 && !this.shortcut; tries++) {
+        const a = rng.next() * TAU, d = rng.range(26, 44);
+        const x = (Math.floor((sp[0] + Math.cos(a) * d) / S) + 0.5) * S, z = (Math.floor((sp[1] + Math.sin(a) * d) / S) + 0.5) * S;
+        this.world.getLayout(this.world.chunkOf(x), this.world.chunkOf(z));
+        if (!fl.slab(x, z, 1) || this.world.groundAt(x, z) < -1 || !this.goals.every((g) => Math.hypot(g.x - x, g.z - z) > 4)) continue;
+        this.shortcut = this.makeGoal('hatch', x, z, 0, {}, fl.y(1) + 0.06);
+      }
+    }
     return items;
   }
 
@@ -13940,6 +13981,14 @@ class Objectives {
 
   // ------------------------------------------------------------ interaction
   candidates(px, pz, out) {
+    const sc = this.shortcut;
+    if (sc && !this.finished && sc.state !== 'done' && Math.abs(sc.x - px) < 3 && Math.abs(sc.z - pz) < 3) {
+      const f = sc.focus;
+      out.push({ x: f.x, y: f.y, z: f.z, text: 'Climb out through the roof hatch', use: () => {
+        sc.state = 'done'; this.game.audio.door('hatch');
+        sc.play('hatch', () => { if (this.finished) return; this.finished = true; this.game.bus.emit('shortcut'); this.game.levelComplete(); });
+      } });
+    }
     for (const g of this.clues || []) {
       if (Math.abs(g.x - px) > 3 || Math.abs(g.z - pz) > 3) continue;
       const f = g.focus;
@@ -17025,6 +17074,131 @@ function buildCutEdges(world, l, b, P, H) {
   }
 }
 
+// ---------------------------------------------------------------- painted maps
+/**
+ * gen.params.layout: rows of characters, one per 2 m cell from the world origin
+ * (row = z cell, column = x cell), painted in the level studio's map:
+ *   #  solid - a block of wall    .  S  open floor    ?  (or anything else) the generator decides
+ * A wall goes wherever a solid cell meets one that is not solid; open cells next to
+ * each other are joined. Returns the solid cells of this chunk (or null if none).
+ */
+function applyLayout(world, l, rows) {
+  const N = world.N, S = world.S;
+  const at = (gx, gz) => (gz >= 0 && gz < rows.length && gx >= 0 && gx < rows[gz].length ? rows[gz][gx] : '?');
+  const solid = (c) => c === '#', open = (c) => c === '.' || c === 'S';
+  let any = false;
+  const out = new Uint8Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const gx = l.gx0 + i, gz = l.gz0 + j, c = at(gx, gz);
+    if (solid(c)) { out[i + j * N] = 1; any = true; }
+    // the west edge of this cell (V) and its north edge (H)
+    for (const [e, o] of [['V', at(gx - 1, gz)], ['H', at(gx, gz - 1)]]) {
+      let v = null;
+      if (solid(c) !== solid(o)) v = solid(c) || solid(o) ? EDGE.WALL : null;
+      else if (solid(c) && solid(o)) v = EDGE.OPEN;          // inside a block: no walls in the walls
+      else if (open(c) && open(o)) v = EDGE.OPEN;
+      if (v === null) continue;
+      if (e === 'V') setV(world, l, i, j, v); else setH(world, l, i, j, v);
+    }
+  }
+  if (!any) return null;
+  // nothing walks into, spawns in or hides loot in a solid block
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) if (out[i + j * N]) {
+    l.colliders.add(makeCollider((l.gx0 + i) * S, -1, (l.gz0 + j) * S, (l.gx0 + i + 1) * S, 3, (l.gz0 + j + 1) * S, C.NAVBLOCK));
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- walking on the ceiling
+// Corrupted levels (gen.params.ceilingWalk): near the spawn the ceiling has fallen in
+// over a heap of rubble you can climb, and the top of the ceiling holds your weight.
+// Up there it is dark, quiet, and nothing below can follow - and somewhere across it
+// is a roof hatch: a shortcut out of the level (see Objectives.setup).
+function breachRect(world, P) {
+  const sp = (world.level && world.level.spawn) || [16, 16];
+  const S = world.S, gx = Math.floor(sp[0] / S) + 2, gz = Math.floor(sp[1] / S) - 3;
+  return { gx, gz, w: 3, x0: gx * S, z0: gz * S, x1: (gx + 3) * S, z1: (gz + 1) * S };
+}
+function inBreach(world, x, z) {
+  const r = breachRect(world, world.gen.params);
+  return x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1;
+}
+/** The cells under the breach are open floor, all the way along (before the walls are made solid). */
+function openBreach(world, l, P) {
+  const N = world.N, br = breachRect(world, P);
+  for (let k = 0; k < br.w; k++) {
+    const i = br.gx + k - l.gx0, j = br.gz - l.gz0;
+    if (i < 0 || j < 0 || i >= N || j >= N) continue;
+    setV(world, l, i, j, EDGE.OPEN); setV(world, l, i + 1, j, EDGE.OPEN);
+    setH(world, l, i, j, EDGE.OPEN); setH(world, l, i, j + 1, EDGE.OPEN);
+  }
+}
+function layoutCeilingWalk(world, l, rng, P, blocked) {
+  const N = world.N, S = world.S, H = P.height, br = breachRect(world, P);
+  const cells = new Set();
+  for (let k = 0; k < br.w; k++) {
+    const gx = br.gx + k, gz = br.gz, i = gx - l.gx0, j = gz - l.gz0;
+    if (i < 0 || j < 0 || i >= N || j >= N) continue;
+    cells.add(i + j * N);
+  }
+  if (cells.size) {
+    // a heap of rubble, ceiling tiles and a filing cabinet: steps up through the hole
+    const n = Math.ceil(H / 0.36), rise = H / n, run = (br.w * S - 0.6) / n;
+    const steps = [];
+    for (let k = 0; k < n; k++) {
+      const x0 = br.x0 + 0.3 + k * run, top = rise * (k + 1);
+      if (x0 < l.x0 || x0 >= l.x0 + l.size) continue;
+      steps.push([x0, top]);
+      l.colliders.add(makeCollider(x0, 0, br.z0 + 0.35, x0 + run + 0.02, top, br.z1 - 0.35, C.SOLID | C.PLATFORM));
+    }
+    l.breach = { cells, steps, run, rise, z0: br.z0 + 0.35, z1: br.z1 - 0.35 };
+  }
+  // the top of the ceiling: one thin slab per run of solid cells in each row
+  const H0 = H, top = H + 0.06;
+  for (let j = 0; j < N; j++) {
+    let i = 0;
+    while (i < N) {
+      const skip = (q) => cells.has(q + j * N) || (blocked && l.void && l.void[q + j * N]);
+      if (skip(i)) { i++; continue; }
+      let k = i; while (k < N && !skip(k)) k++;
+      l.colliders.add(makeCollider((l.gx0 + i) * S, H0, (l.gz0 + j) * S, (l.gx0 + k) * S, top, (l.gz0 + j + 1) * S, C.SOLID | C.PLATFORM));
+      i = k;
+    }
+  }
+  // a few work lamps left on up there
+  if (rng.chance(0.6)) {
+    const x = l.x0 + rng.range(4, l.size - 4), z = l.z0 + rng.range(4, l.size - 4);
+    l.fixtures.push({ x, y: top + 1.4, z, type: 'bulb', emit: 'omni', frame: false, color: [0.7, 0.85, 1.0], intensity: 1.2, flicker: rng.chance(0.3) ? FLICKER.BUZZ : FLICKER.STEADY, soft: 0.6, range: 12, roof: true });
+  }
+}
+function buildCeilingWalk(world, l, b, P) {
+  const N = world.N, S = world.S, top = P.height + 0.06;
+  // the upper side of the ceiling: dusty boards between the joists
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    if (l.void && l.void[i + j * N]) continue;
+    if (l.breach && l.breach.cells.has(i + j * N)) continue;
+    b.quad('concrete_dark', (l.gx0 + i) * S, top, (l.gz0 + j + 1) * S, S, 0, 0, 0, 0, -S, {});
+  }
+  for (let j = 0; j < N; j += 3) b.box('wood_dark', l.x0, top, (l.gz0 + j) * S - 0.06, l.x0 + l.size, top + 0.12, (l.gz0 + j) * S + 0.06, { faces: 1 | 2 | 4 | 16 | 32 });
+  for (const fx of l.fixtures) if (fx.roof) {
+    b.cylinder('metal_dark', fx.x, top, fx.z, 0.03, 1.3, { segments: 6 });
+    b.box('fixture_bulb', fx.x - 0.1, fx.y - 0.1, fx.z - 0.1, fx.x + 0.1, fx.y + 0.1, fx.z + 0.1, { slot: fx.slot, uv: 'unit' });
+  }
+  if (l.breach) {
+    const B = l.breach;
+    for (const [x0, h] of B.steps) {
+      b.box('concrete_dark', x0, 0, B.z0, x0 + B.run + 0.02, h, B.z1, {});
+      b.box('decal_crack', x0 + 0.02, h, B.z0 + 0.1, x0 + B.run - 0.02, h + 0.004, B.z1 - 0.1, { faces: 4, uv: 'unit' });
+    }
+    // broken ceiling tiles hanging at the edge of the hole
+    const r = breachRect(world, P);
+    for (let k = 0; k < 5; k++) {
+      const x = r.x0 + 0.4 + k * (r.x1 - r.x0 - 0.8) / 4;
+      b.quad(P.ceilMat, x, P.height - 0.02, r.z0, 0.5, -0.35, 0.1, 0, 0, 0.6, {});
+    }
+  }
+}
+
 function makeLobbyGen(p = {}) {
   const P = {
     height: 2.75,
@@ -17061,6 +17235,18 @@ function makeLobbyGen(p = {}) {
     params: P,
 
     init(world, level) {
+      if (P.ceilingWalk) {
+        // two floors: the level, and the top of its ceiling. Nothing down there climbs up.
+        const H = P.height;
+        this.floors = {
+          count: 2, storey: H, climb: false,
+          y: (f) => (f > 0 ? H : 0),
+          floorOf: (y) => (y > H - 0.6 ? 1 : 0),
+          slab: (x, z, f) => f === 0 || !inBreach(world, x, z),
+          dropTo: (x, z, f) => (f > 0 && inBreach(world, x, z) ? 0 : f),
+          slots: () => [], spots: () => [],
+        };
+      }
       if (!cutsOf(P)) return;
       this.sky = __mod['src/world/gen/open.js'].makeSky(level);
       world.scene.add(this.sky);
@@ -17137,13 +17323,16 @@ function makeLobbyGen(p = {}) {
           if (j > 5) setH(world, l, i, j, EDGE.OPEN);
         }
       }
+      // --- a painted map (the level studio's gen.params.layout) overrides the strokes
+      const painted = P.layout ? applyLayout(world, l, P.layout) : null;
+      if (P.ceilingWalk) openBreach(world, l, P);
       // --- the cuts: no floor, no ceiling, no walls, and nothing may path into them
-      let blocked = null;
+      let blocked = painted;
       if (cuts) {
         blocked = l.void = new Uint8Array(N * N);
         for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
           const gx = gx0 + i, gz = gz0 + j, v = isVoid(gx, gz);
-          if (v) blocked[i + j * N] = 1;
+          if (v || (painted && painted[i + j * N])) blocked[i + j * N] = 1;
           if (v || isVoid(gx - 1, gz)) l.V[i + j * N] = EDGE.OPEN;
           if (v || isVoid(gx, gz - 1)) l.H[i + j * N] = EDGE.OPEN;
         }
@@ -17226,6 +17415,7 @@ function makeLobbyGen(p = {}) {
         }
       }
 
+      if (P.ceilingWalk) layoutCeilingWalk(world, l, rng, P, blocked);
       placeProps(world, l, rng, P.props, P);
       placeFeatures(world, l, rng, P);
       placeWetness(world, l, rng, P);
@@ -17238,6 +17428,7 @@ function makeLobbyGen(p = {}) {
         floorMat: (gx, gz, i, j) => (l.void && l.void[i + j * N] ? null : P.floorMat),
         ceilMat: (gx, gz, i, j) => {
           if (l.void && l.void[i + j * N]) return null;
+          if (l.breach && l.breach.cells.has(i + j * N)) return null;
           const cuts = world.cuts;
           if (cuts) for (const c of cuts) if (gx * S < c[2] && (gx + 1) * S > c[0] && gz * S < c[3] && (gz + 1) * S > c[1]) return null;
           return P.ceilMat;
@@ -17267,6 +17458,7 @@ function makeLobbyGen(p = {}) {
       // fixtures flagged frame:false are not ceiling troffers (see features.js)
       for (const fx of l.fixtures) if (fx.frame !== false) buildTroffer(b, fx, H, P.frameMat, P.fixtureMat);
       buildFeatures(world, l, b, ctx, P);
+      if (P.ceilingWalk) buildCeilingWalk(world, l, b, P);
       buildCutEdges(world, l, b, P, H);
       buildWetness(world, l, b);
       // flooded levels (the Poolrooms): one sheet of water over every floor
@@ -23519,6 +23711,14 @@ function boot() {
     }
     window.game = new Game(canvas);
     window.__levels = LEVELS;
+    // a level studio preview goes straight into the level (click the view to take the mouse)
+    if (window.__previewLevel && LEVELS.some((l) => l.id === window.__previewLevel)) {
+      const g = window.game;
+      g.enter(window.__previewLevel).then(() => g.hud.toast('Studio preview. Click to look around - Esc for the menu.', 4200));
+    } else if (window.__previewError) {
+      const box = document.getElementById('fatal');
+      if (box) { box.classList.remove('hidden'); box.textContent = 'Level studio preview failed: ' + window.__previewError; }
+    }
   } catch (err) {
     console.error(err);
     const box = document.getElementById('fatal');

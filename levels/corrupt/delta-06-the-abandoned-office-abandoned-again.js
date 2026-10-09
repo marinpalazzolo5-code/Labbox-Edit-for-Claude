@@ -18,7 +18,7 @@ LabLevels.add('corrupt', {
   passive: false,
   seed: 7246,
   description: 'Monitors grown over with ivy, the water coolers dry. The far end of the floor is a torn edge and a drop into cloud.',
-  intro: 'The security door needs a keycard. Someone left it in a desk drawer. There is no ceiling past the third bay. Take the long way round the edge.',
+  intro: 'The security door needs a keycard. Someone left it in a desk drawer. There is no ceiling past the third bay. Take the long way round the edge. Or climb the collapse by the spawn and walk across the top of the ceiling, over everything, to the roof hatch.',
   spawn: [16, 16],
   fall: true,
   ambientLight: [0.0608, 0.063, 0.0674],
@@ -38,6 +38,7 @@ LabLevels.add('corrupt', {
   gen: {
     type: 'lobby',
     params: {
+      ceilingWalk: true,
       height: 2.7,
       wallMat: 'drywall_grey',
       floorMat: 'carpet_office',

@@ -7,7 +7,10 @@
 //   * checkpoints: passing a landing with a door (or every fourth landing) sets
 //     one, and dying sends the player back to it, not to the foot of the stairs;
 //   * transports between levels: a final stage with `next` carries the player
-//     straight into that level.
+//     straight into that level;
+//   * walking on the ceiling (gen.params.ceilingWalk, cor01): the rubble by the
+//     spawn climbs through the hole, the top of the ceiling holds the player, and
+//     the roof hatch up there is a shortcut out of the level.
 //
 //   node tools/playtest/stages.mjs
 // ============================================================================
@@ -81,6 +84,34 @@ if (from) {
   while (game.state === 'loading' && n++ < 6000) await clock.settle(1);
   check(game.level.id === st.def.next, `${from.id} carries the player on to ${st.def.next} (now in ${game.level.id})`);
 } else console.log('     (no level has a stage with next)');
+
+// ---- cor01: climb the rubble onto the ceiling and leave by the roof hatch
+const cw = LEVELS.find((l) => l.gen && l.id === 'cor01');
+if (cw) {
+  await enter('cor01');
+  const w = game.world, H = w.gen.params.height, S = w.S;
+  const sp = cw.spawn || [16, 16];
+  const gx = Math.floor(sp[0] / S) + 2, gz = Math.floor(sp[1] / S) - 3;
+  const z = (gz + 0.5) * S;
+  pl.pos.set(gx * S - 0.6, 0, z); pl.vel.set(0, 0, 0);
+  for (let i = 0; i < 60 * 6 && pl.pos.x < (gx + 3) * S + 1.5; i++) { pl.pos.x += 0.03; await clock.settle(1); }
+  check(pl.pos.y > H - 0.1, `cor01: climbing the rubble puts the player on the ceiling (y=${pl.pos.y.toFixed(2)}, ceiling ${H})`);
+  for (let i = 0; i < 60; i++) { pl.pos.x += 0.03; await clock.settle(1); }
+  check(pl.pos.y > H - 0.1, `cor01: the top of the ceiling holds the player (y=${pl.pos.y.toFixed(2)})`);
+  const sc = game.objectives.shortcut;
+  check(!!sc, 'cor01: there is a roof hatch on top of the ceiling');
+  if (sc) {
+    pl.pos.set(sc.x + 0.8, sc.y, sc.z); pl.vel.set(0, 0, 0);
+    await clock.settle(10);
+    check(pl.pos.y > H - 0.1, `cor01: the hatch stands on the ceiling (player y=${pl.pos.y.toFixed(2)})`);
+    const cands = [];
+    game.objectives.candidates(pl.pos.x, pl.pos.z, cands);
+    const hatch = cands.find((c) => /roof hatch/.test(c.text));
+    check(!!hatch, 'cor01: the roof hatch can be used');
+    if (hatch) { hatch.use(); for (let i = 0; i < 200 && !game.objectives.finished; i++) await clock.settle(1); }
+    check(game.objectives.finished, 'cor01: the roof hatch is a way out of the level');
+  }
+}
 
 const real = problems.filter((p) => !/GPU stall/.test(p.msg));
 for (const p of real) console.log('  ! ' + p.kind + ': ' + p.msg.slice(0, 300));

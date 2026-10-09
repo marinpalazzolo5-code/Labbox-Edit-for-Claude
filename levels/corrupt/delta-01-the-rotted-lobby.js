@@ -17,7 +17,7 @@ LabLevels.add('corrupt', {
   passive: false,
   seed: 7041,
   description: 'The yellow has gone green. Ceiling tiles lie where they fell and the light comes down through the gaps in dusty bars. Two rooms did not load at all, and only their holes are left.',
-  intro: 'Nothing lives here. Only the hum, and the feeling of being watched. Find a way out. The roof has holes now. Water comes through them in streams, and something has grown in the carpet.',
+  intro: 'Nothing lives here. Only the hum, and the feeling of being watched. Find a way out. The roof has holes now. Water comes through them in streams, and something has grown in the carpet. Just past the spawn the ceiling has fallen in over a heap of rubble: climb it, and the top of the ceiling will hold you. Somewhere up there is a roof hatch.',
   spawn: [16, 16],
   wet: true,
   fall: true,
@@ -30,6 +30,7 @@ LabLevels.add('corrupt', {
   gen: {
     type: 'lobby',
     params: {
+      ceilingWalk: true,
       height: 2.75,
       wallMat: 'l0_wall',
       floorMat: 'l0_carpet',
