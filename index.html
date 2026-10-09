@@ -7567,6 +7567,8 @@ class World {
     this.onChunkBuilt = null;
     this.onChunkDisposed = null;
     this.extraFixtures = []; // fixtures not tied to chunks (transition modules)
+    this.movers = new Set();  // moving set pieces (carousels, escalator steps): { update(dt, t) }
+    this.moverT = 0;
   }
 
   // ------------------------------------------------------------ level load
@@ -7599,6 +7601,7 @@ class World {
     this.layouts.clear();
     this.buildQueue.length = 0;
     this.dynamicColliders.clear();
+    this.movers.clear();
     if (this.gen && this.gen.dispose) this.gen.dispose(this);
     for (const fx of this.extraFixtures) this.lights.release(fx);
     this.extraFixtures = [];
@@ -7928,6 +7931,8 @@ class World {
 
   update(dt, px, pz) {
     if (!this.gen) return;
+    this.moverT += dt;
+    for (const mv of this.movers) mv.update(dt, this.moverT);
     const cx = this.chunkOf(px), cz = this.chunkOf(pz);
     const R = this.renderRadius;
     // enqueue missing chunks
@@ -10318,8 +10323,16 @@ const { makeCollider: makeCollider, C: C } = __mod['src/world/collision.js'];
 const { EDGE: EDGE } = __mod['src/world/world.js'];
 const { CONTAINERS: CONTAINERS } = __mod['src/world/containers.js'];
 const { hash32: hash32 } = __mod['src/core/rng.js'];
+const { GeometryBuilder: GeometryBuilder } = __mod['src/world/builder.js'];
+const { FLICKER: FLICKER } = __mod['src/world/lights.js'];
 // Static prop library. Props are merged into chunk geometry (so they receive
 // baked light and cost no extra draw calls) and register colliders.
+//
+// A prop can also have moving parts: `dynamic(world, l, ctx, p, m, rng)` builds
+// them with addMover() into their own little meshes (still light-baked, at the
+// pose they were built in) that the world turns or slides every frame. A
+// collider can carry what stands on it - give it a 7th entry: 'spin' (turns with
+// the prop, def.spin rad/s) or 'belt' (an escalator step, moves toward local +z).
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -10916,41 +10929,136 @@ const PROPS = {
     },
   },
   carousel: {
-    size: [6.4, 6.4], colliders: [[-3.2, 0, -3.2, 3.2, 0.34, 3.2], [-0.34, 0.34, -0.34, 0.34, 3.3, 0.34]],
+    // a working carousel: the plinth stays put, everything above it turns, and the
+    // horses ride up and down their poles. Stand on the deck and it carries you round.
+    size: [6.4, 6.4], spin: 0.42,
+    colliders: [
+      [-3.25, 0, -3.25, 3.25, 0.14, 3.25],
+      [-3.05, 0.14, -1.3, 3.05, 0.36, 1.3, 'spin'], [-1.3, 0.14, -3.05, 1.3, 0.36, 3.05, 'spin'], [-2.25, 0.14, -2.25, 2.25, 0.36, 2.25, 'spin'],
+      [-0.5, 0.36, -0.5, 0.5, 3.3, 0.5],
+    ],
+    light: { y: 3.0, color: [1.0, 0.78, 0.5], intensity: 1.8, range: 12 },
     build(b, m, rng) {
+      // the plinth: a marble drum with a brass kick plate and a ring of floor lamps
+      cyl(b, 'marble_floor', m, 0, 0, 0, 3.32, 0.14, 32, { caps: 'top' });
+      cyl(b, 'brass', m, 0, 0.0, 0, 3.34, 0.05, 32, { caps: false });
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2, x = Math.cos(a) * 3.22, z = Math.sin(a) * 3.22;
+        bx(b, i % 2 ? 'fixture_bulb' : 'fixture_red', m, x - 0.04, 0.14, z - 0.04, x + 0.04, 0.18, z + 0.04, 63, { uv: 'unit' });
+      }
+      void rng;
+    },
+    dynamic(world, l, ctx, p, m, rng) {
       const trim = rng.pick(['brass', 'gold']);
-      cyl(b, 'marble_floor', m, 0, 0.02, 0, 3.1, 0.3, 24, { caps: 'bottom' });
-      cyl(b, 'terrazzo', m, 0, 0.3, 0, 3.02, 0.04, 24, { caps: false });
-      cyl(b, trim, m, 0, 3.1, 0, 3.24, 0.12, 24, { caps: false });
-      cyl(b, trim, m, 0, 0.34, 0, 3.24, 0.1, 24, { caps: false });
-      cyl(b, trim, m, 0, 3.22, 0, 3.24, 0.16, 24);
-      // the canopy: a scalloped cone, striped, with a ring of bulbs under the fascia
-      for (const [k, r0, r1] of [['art_a', 3.24, 2.5], ['art_b', 2.5, 1.7], ['art_c', 1.7, 0.9], ['art_d', 0.9, 0.34]]) {
-        cyl(b, k, m, 0, 3.38, 0, r0, 0.02, 24, { rTop: r1, caps: false });
-      }
-      cyl(b, trim, m, 0, 3.38, 0, 0.5, 0.24, 12);
-      sphereAt(b, trim, m, 0, 3.72, 0, 0.2);
-      for (let i = 0; i < 24; i++) {
-        const a = (i / 24) * Math.PI * 2;
-        bx(b, i % 2 ? 'fixture_bulb' : 'fixture_red', m, Math.cos(a) * 3.16 - 0.09, 3.16, Math.sin(a) * 3.16 - 0.09, Math.cos(a) * 3.16 + 0.09, 3.28, Math.sin(a) * 3.16 + 0.09, 63, { uv: 'unit' });
-      }
-      cyl(b, trim, m, 0, 0.34, 0, 0.22, 2.9, 12);
-      cyl(b, 'chrome', m, 0, 3.0, 0, 0.3, 0.14, 12);
-      // six horses on brass poles, all of them caught mid-stride
-      const hide = rng.pick(['fabric_white', 'fabric_brown', 'plastic_white']);
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * Math.PI * 2 + 0.26, cx = Math.cos(a) * 2.1, cz = Math.sin(a) * 2.1;
-        cyl(b, 'brass', m, cx, 0.34, cz, 0.035, 2.8, 8);
-        const hm = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(cx, 1.5, cz).multiply(new THREE.Matrix4().makeRotationY(-a)));
-        bx(b, hide, hm, -0.56, 0.02, -0.18, 0.5, 0.42, 0.18);
-        bx(b, hide, hm, 0.34, 0.24, -0.14, 0.72, 0.5, 0.14);
-        bx(b, hide, hm, 0.62, 0.36, -0.1, 0.84, 0.58, 0.1);
-        bx(b, 'velvet', hm, -0.3, 0.42, -0.2, 0.12, 0.5, 0.2);
-        for (const [lx, lz, ph] of [[-0.42, -0.16, -1], [-0.42, 0.16, 1], [0.4, -0.16, 1], [0.4, 0.16, -1]]) {
-          tube(b, hide, hm, [lx, 0.04, lz], [lx + ph * 0.16, -0.62, lz + ph * 0.1], 0.055, 6);
+      const hides = ['fabric_white', 'plastic_white', 'porcelain', 'fabric_brown', 'statue_marble'];
+      const saddles = ['velvet', 'gallery_red', 'gallery_green', 'plastic_blue'];
+      const panels = ['art_a', 'art_b', 'art_c', 'art_d'];
+      const N = 8, R = 2.25;
+      const body = (b) => {
+        // the deck, its edge and the centre column of mirrors and painted panels
+        cyl(b, 'wood_floor', m, 0, 0.14, 0, 3.1, 0.2, 32);
+        cyl(b, trim, m, 0, 0.14, 0, 3.14, 0.22, 32, { caps: false });
+        cyl(b, 'terrazzo', m, 0, 0.345, 0, 0.75, 0.02, 16);
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2 + Math.PI / 8, c = Math.cos(a), s = Math.sin(a);
+          const pm = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(c * 0.5, 0, s * 0.5).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2 - a)));
+          bx(b, 'metal_white', pm, -0.21, 0.36, -0.03, 0.21, 2.95, 0.0);
+          bx(b, i % 2 ? 'mirror' : panels[i % 4], pm, -0.17, 0.95, 0.0, 0.17, 2.3, 0.012, 63, { uv: 'unit' });
+          bx(b, trim, pm, -0.21, 0.88, 0.0, 0.21, 0.95, 0.02);
+          bx(b, trim, pm, -0.21, 2.3, 0.0, 0.21, 2.37, 0.02);
         }
-        tube(b, hide, hm, [-0.56, 0.36, 0], [-0.78, 0.1, 0], 0.05, 6);
-      }
+        cyl(b, trim, m, 0, 2.95, 0, 0.62, 0.12, 16);
+        // the canopy: sweeps out to every pole, a striped cone, a painted rounding board with bulbs, a scalloped valance
+        for (const [k, r0, r1, y0] of [['art_a', 3.24, 2.5, 3.32], ['art_b', 2.5, 1.7, 3.5], ['art_c', 1.7, 0.9, 3.68], ['art_d', 0.9, 0.3, 3.86]]) {
+          cyl(b, k, m, 0, y0, 0, r0, 0.18, 32, { rTop: r1, caps: false });
+        }
+        cyl(b, trim, m, 0, 3.98, 0, 0.32, 0.22, 12);
+        sphereAt(b, trim, m, 0, 4.32, 0, 0.16);
+        cyl(b, trim, m, 0, 4.42, 0, 0.02, 0.5, 6);
+        bx(b, 'gallery_red', m, 0.02, 4.68, -0.01, 0.4, 4.88, 0.01);
+        cyl(b, 'metal_white', m, 0, 2.98, 0, 3.26, 0.36, 32, { caps: false });
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2 + 0.1, c = Math.cos(a), s = Math.sin(a);
+          const pm = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(c * 3.28, 0, s * 3.28).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2 - a)));
+          bx(b, panels[i % 4], pm, -0.5, 3.02, 0, 0.5, 3.3, 0.02, 63, { uv: 'unit' });
+          bx(b, trim, pm, -0.62, 2.98, 0, 0.62, 3.02, 0.04);
+          bx(b, trim, pm, -0.62, 3.3, 0, 0.62, 3.34, 0.04);
+          // the valance: one scallop per panel
+          bx(b, i % 2 ? 'gallery_red' : 'fabric_white', pm, -0.5, 2.8, 0.0, 0.5, 2.98, 0.01, 63);
+          bx(b, i % 2 ? 'gallery_red' : 'fabric_white', pm, -0.3, 2.72, 0.0, 0.3, 2.8, 0.01, 63);
+          for (const bxp of [-0.55, 0, 0.55]) bx(b, 'fixture_bulb', pm, bxp - 0.045, 3.12, 0.02, bxp + 0.045, 3.21, 0.07, 63, { uv: 'unit' });
+        }
+        for (let i = 0; i < N; i++) {
+          const a = (i / N) * Math.PI * 2, cx = Math.cos(a) * R, cz = Math.sin(a) * R;
+          cyl(b, trim, m, cx, 0.34, cz, 0.032, 2.64, 8);
+          for (const y of [0.34, 2.9]) cyl(b, trim, m, cx, y, cz, 0.06, 0.06, 8);
+          tube(b, 'metal_dark', m, [0, 2.96, 0], [cx, 2.98, cz], 0.03, 5);
+        }
+        // two chariots between the horses, for the ones who do not ride
+        for (const a of [Math.PI / N, Math.PI + Math.PI / N]) {
+          const c = Math.cos(a), s = Math.sin(a);
+          const pm = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(c * 1.6, 0.34, s * 1.6).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2 - a)));
+          bx(b, 'gold', pm, -0.55, 0, -0.34, 0.55, 0.42, 0.34);
+          bx(b, 'velvet', pm, -0.5, 0.42, -0.3, 0.5, 0.5, 0.3);
+          bx(b, 'gold', pm, -0.55, 0.42, -0.34, -0.42, 1.0, 0.34);
+          bx(b, panels[Math.round(a) % 4], pm, -0.56, 0.5, -0.3, -0.55, 0.95, 0.3, 63, { uv: 'unit' });
+          sphereAt(b, 'gold', pm, 0.55, 0.5, 0, 0.12);
+        }
+      };
+      const horse = (b, i) => {
+        const a = (i / N) * Math.PI * 2, cx = Math.cos(a) * R, cz = Math.sin(a) * R;
+        // local +x points along the way the deck turns: every horse runs nose to tail round the ring
+        const hm = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(cx, 1.42, cz).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2 - a)));
+        const hide = hides[(i + rng.int(0, 4)) % hides.length], sad = saddles[i % saddles.length];
+        const mane = i % 2 ? 'gold' : 'plastic_black';
+        // barrel: chest and rump spheres joined by a thick tube
+        sphereAt(b, hide, hm, 0.26, 0.02, 0, 0.25, 1.05);
+        sphereAt(b, hide, hm, -0.3, 0.02, 0, 0.26, 1.0);
+        tube(b, hide, hm, [-0.3, 0.02, 0], [0.26, 0.02, 0], 0.235, 10);
+        // neck, head, muzzle, ears, eyes
+        tube(b, hide, hm, [0.34, 0.08, 0], [0.58, 0.5, 0], 0.11, 8);
+        sphereAt(b, hide, hm, 0.6, 0.54, 0, 0.12, 1.0);
+        tube(b, hide, hm, [0.6, 0.56, 0], [0.86, 0.42, 0], 0.075, 8);
+        sphereAt(b, hide, hm, 0.87, 0.42, 0, 0.07, 0.9);
+        for (const s of [-1, 1]) {
+          tube(b, hide, hm, [0.56, 0.64, s * 0.05], [0.5, 0.78, s * 0.06], 0.022, 5);
+          sphereAt(b, 'plastic_black', hm, 0.7, 0.55, s * 0.075, 0.022);
+          bx(b, trim, hm, 0.62, 0.46, s * 0.075 - 0.006, 0.86, 0.48, s * 0.075 + 0.006);
+        }
+        // mane down the neck, and a tail
+        for (let k = 0; k < 6; k++) {
+          const t = k / 5, mx = 0.32 + t * 0.24, my = 0.16 + t * 0.44;
+          bx(b, mane, hm, mx - 0.06, my, -0.03, mx + 0.03, my + 0.1, 0.03);
+        }
+        tube(b, mane, hm, [-0.52, 0.12, 0], [-0.68, -0.08, 0], 0.05, 6);
+        tube(b, mane, hm, [-0.68, -0.08, 0], [-0.7, -0.38, 0], 0.04, 6);
+        // saddle, blanket and stirrups
+        bx(b, sad, hm, -0.24, 0.22, -0.25, 0.18, 0.3, 0.25);
+        bx(b, trim, hm, -0.26, 0.2, -0.27, 0.2, 0.23, 0.27);
+        bx(b, sad, hm, -0.26, 0.3, -0.12, -0.18, 0.4, 0.12);
+        for (const s of [-1, 1]) {
+          tube(b, 'metal_dark', hm, [-0.02, 0.2, s * 0.26], [-0.02, -0.12, s * 0.28], 0.01, 4);
+          bx(b, trim, hm, -0.06, -0.15, s * 0.28 - 0.03, 0.02, -0.12, s * 0.28 + 0.03);
+        }
+        // legs: front pair prancing, hind pair planted
+        for (const s of [-1, 1]) {
+          tube(b, hide, hm, [0.3, -0.12, s * 0.12], [0.5, -0.3, s * 0.13], 0.055, 6);
+          tube(b, hide, hm, [0.5, -0.3, s * 0.13], [0.42, -0.52, s * 0.13], 0.045, 6);
+          cyl(b, 'plastic_black', hm, 0.42, -0.6, s * 0.13, 0.05, 0.08, 6);
+          tube(b, hide, hm, [-0.36, -0.12, s * 0.12], [-0.42, -0.45, s * 0.12], 0.06, 6);
+          tube(b, hide, hm, [-0.42, -0.45, s * 0.12], [-0.34, -0.78, s * 0.12], 0.045, 6);
+          cyl(b, 'plastic_black', hm, -0.34, -0.86, s * 0.12, 0.05, 0.08, 6);
+        }
+      };
+      const mv = addMover(world, l, ctx, body, p);
+      if (!mv) return;
+      const horses = [];
+      for (let i = 0; i < N; i++) horses.push(attachPart(world, l, mv, (b) => horse(b, i), p));
+      const spin = this.spin;
+      mv.update = (dt, t) => {
+        mv.outer.rotation.y = t * spin;
+        for (let i = 0; i < horses.length; i++) horses[i].position.y = -p.y + 0.16 * Math.sin(t * 1.7 + i * 1.9);
+      };
     },
   },
   trampoline: {
@@ -10972,45 +11080,91 @@ const PROPS = {
     },
   },
   escalator: {
+    // a running escalator. The steps are colliders that carry whoever stands on them
+    // up toward local +z (opts.down runs it the other way, opts.still stops it); the
+    // treads you see are a separate row of moving steps that loop up the incline.
     size: [1.7, 6.2], wall: false, dynamicSize: true,
     collidersFor(o) {
-      const len = o.len || 5.6, rise = o.rise || 2.6, n = o.steps || 14;
+      const len = o.len || 5.6, rise = o.rise || 2.6, n = o.steps || Math.max(12, Math.round(rise / 0.19));
       const run = len / n, riser = rise / n, z0 = -(len + 1.6) / 2;
       const out = [[-0.7, 0, z0, 0.7, 0.06, z0 + 0.8]];
       for (let i = 0; i < n; i++) {
         const za = z0 + 0.8 + i * run, zb = za + run, top = 0.06 + (i + 1) * riser;
-        out.push([-0.62, 0, za, 0.62, top, zb]);
-        out.push([-0.7, 0.06 + i * riser, za, -0.62, top + 1.0, zb]);
-        out.push([0.62, 0.06 + i * riser, za, 0.7, top + 1.0, zb]);
+        out.push([-0.62, 0, za, 0.62, top, zb, o.still ? undefined : 'belt']);
+        out.push([-0.78, 0.06 + i * riser, za, -0.62, top + 1.0, zb]);
+        out.push([0.62, 0.06 + i * riser, za, 0.78, top + 1.0, zb]);
       }
       const zt = z0 + 0.8 + len;
       out.push([-0.7, 0, zt, 0.7, 0.06 + rise + 0.05, zt + 0.8]);
       return out;
     },
     build(b, m, rng, o) {
-      const len = o.len || 5.6, rise = o.rise || 2.6, n = o.steps || 14;
-      const run = len / n, riser = rise / n, z0 = -(len + 1.6) / 2;
-      const deck = o.deck || 'metal_grey';
-      bx(b, deck, m, -0.72, 0, z0 - 0.2, 0.72, 0.06, z0 + 0.8);
-      cyl(b, 'steel', m, -0.4, -0.9, z0 + 0.4, 0.1, 0.9, 8);
-      cyl(b, 'steel', m, 0.4, -0.9, z0 + 0.4, 0.1, 0.9, 8);
-      for (let i = 0; i < n; i++) {
-        const za = z0 + 0.8 + i * run, zb = za + run, top = 0.06 + (i + 1) * riser, y = 0.06 + i * riser;
-        bx(b, 'steel', m, -0.6, y, za, 0.6, top, zb);
-        bx(b, 'metal_dark', m, -0.6, top - 0.014, za, 0.6, top, zb, 63 & ~8);
-        for (const s of [-1, 1]) {
-          bx(b, 'metal_white', m, s > 0 ? 0.62 : -0.7, y, za, s > 0 ? 0.7 : -0.62, top + 0.02, zb, 63 & ~8);
-          bx(b, 'glass', m, s > 0 ? 0.63 : -0.68, top + 0.02, za, s > 0 ? 0.69 : -0.63, top + 0.94, zb, 63 & ~8);
-          tube(b, 'rubber_black', m, [s * 0.655, top + 1.0, za], [s * 0.655, top + 1.0 + riser, zb], 0.035, 6);
-        }
-        if (i < 2 || i > n - 3) bx(b, 'hazard', m, -0.6, top, za, 0.6, top + 0.005, zb, 63 & ~8);
-      }
-      const zt = z0 + 0.8 + len;
+      const len = o.len || 5.6, rise = o.rise || 2.6, n = o.steps || Math.max(12, Math.round(rise / 0.19));
+      const run = len / n, riser = rise / n, z0 = -(len + 1.6) / 2, zs = z0 + 0.8, zt = zs + len;
+      const deck = o.deck || 'metal_grey', side = o.side || 'metal_white';
+      // landing plates with comb plates and a hazard edge
+      bx(b, deck, m, -0.72, 0, z0 - 0.2, 0.72, 0.06, zs);
+      bx(b, 'hazard', m, -0.6, 0.06, zs - 0.1, 0.6, 0.065, zs, 63 & ~8);
       bx(b, 'steel', m, -0.72, 0, zt, 0.72, 0.06 + rise + 0.04, zt + 0.8);
-      bx(b, 'metal_dark', m, -0.72, 0.06 + rise + 0.04, zt, 0.72, 0.06 + rise + 0.06, zt + 0.8, 63 & ~8);
-      bx(b, 'rubber_black', m, -0.3, 0.06 + rise + 0.06, zt + 0.1, 0.3, 0.08 + rise + 0.06, zt + 0.6);
-      for (const s of [-1, 1]) bx(b, 'metal_white', m, s > 0 ? 0.62 : -0.72, 0, zt - 0.4, s > 0 ? 0.72 : -0.62, 0.06 + rise + 1.0, zt + 0.8, 63 & ~8);
-      bx(b, 'metal_white', m, -0.72, 0.06 + rise, zt, 0.72, 0.06 + rise + 1.0, zt + 0.15, 63 & ~8);
+      bx(b, deck, m, -0.72, 0.06 + rise + 0.04, zt, 0.72, 0.06 + rise + 0.06, zt + 0.8, 63 & ~8);
+      bx(b, 'hazard', m, -0.6, 0.06 + rise + 0.06, zt, 0.6, 0.065 + rise + 0.06, zt + 0.1, 63 & ~8);
+      // the truss under the incline, the dark well the steps run in, and the skirts beside them
+      const slope = Math.atan2(rise, len), L = Math.hypot(len, rise);
+      const sm = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(0, 0.06 + rise / 2, zs + len / 2).multiply(new THREE.Matrix4().makeRotationX(-slope)));
+      bx(b, 'metal_dark', sm, -0.6, -0.42, -L / 2, 0.6, -0.3, L / 2);
+      bx(b, side, sm, -0.78, -0.9, -L / 2, 0.78, -0.42, L / 2);
+      for (const s of [-1, 1]) {
+        bx(b, 'steel', sm, s > 0 ? 0.6 : -0.64, -0.42, -L / 2, s > 0 ? 0.64 : -0.6, 0.06, L / 2);
+        bx(b, side, sm, s > 0 ? 0.64 : -0.78, -0.9, -L / 2, s > 0 ? 0.78 : -0.64, 0.12, L / 2);
+        bx(b, 'glass', sm, s > 0 ? 0.68 : -0.73, 0.12, -L / 2, s > 0 ? 0.73 : -0.68, 1.0, L / 2, 63 & ~8);
+        bx(b, 'rubber_black', sm, s > 0 ? 0.65 : -0.76, 1.0, -L / 2, s > 0 ? 0.76 : -0.65, 1.07, L / 2);
+        // the balustrade carries on flat over each landing and turns down into the newel
+        bx(b, 'glass', m, s > 0 ? 0.68 : -0.73, 0.06, z0 - 0.2, s > 0 ? 0.73 : -0.68, 1.0, zs, 63 & ~8);
+        bx(b, 'rubber_black', m, s > 0 ? 0.65 : -0.76, 1.0, z0 - 0.2, s > 0 ? 0.76 : -0.65, 1.07, zs);
+        cyl(b, 'rubber_black', m, s * 0.705, 0.55, z0 - 0.2, 0.06, 0.52, 10);
+        bx(b, 'glass', m, s > 0 ? 0.68 : -0.73, 0.1 + rise, zt, s > 0 ? 0.73 : -0.68, 1.06 + rise, zt + 0.8, 63 & ~8);
+        bx(b, 'rubber_black', m, s > 0 ? 0.65 : -0.76, 1.06 + rise, zt, s > 0 ? 0.76 : -0.65, 1.13 + rise, zt + 0.8);
+        cyl(b, 'rubber_black', m, s * 0.705, 0.6 + rise, zt + 0.8, 0.06, 0.53, 10);
+        bx(b, side, m, s > 0 ? 0.64 : -0.78, 0, z0 - 0.2, s > 0 ? 0.78 : -0.64, 0.12, zs);
+        bx(b, 'fixture_green', m, s > 0 ? 0.6 : -0.62, 0.07, z0 - 0.18, s > 0 ? 0.62 : -0.6, 0.11, z0 - 0.05, 63, { uv: 'unit' });
+      }
+      // a still escalator is just stairs: build its steps into the chunk
+      if (o.still) for (let i = 0; i < n; i++) {
+        const za = zs + i * run, zb = za + run, top = 0.06 + (i + 1) * riser;
+        bx(b, 'steel', m, -0.6, top - riser, za, 0.6, top, zb);
+        bx(b, 'metal_dark', m, -0.6, top - 0.014, za, 0.6, top, zb, 63 & ~8);
+      }
+      void rng;
+    },
+    dynamic(world, l, ctx, p, m, rng, o) {
+      if (o.still) return;
+      const len = o.len || 5.6, rise = o.rise || 2.6, n = o.steps || Math.max(12, Math.round(rise / 0.19));
+      const run = len / n, riser = rise / n, zs = -(len + 1.6) / 2 + 0.8;
+      // one tread (plate, cleats, riser, yellow demarcation) at the bottom of the run; the rest are copies
+      const step = (b) => {
+        bx(b, 'steel', m, -0.6, 0.06 + riser - 0.03, zs, 0.6, 0.06 + riser, zs + run);
+        for (let k = 0; k < 6; k++) bx(b, 'metal_dark', m, -0.58 + k * 0.2, 0.06 + riser, zs + 0.01, -0.5 + k * 0.2, 0.066 + riser, zs + run - 0.01, 4);
+        bx(b, 'metal_dark', m, -0.6, 0.06, zs - 0.004, 0.6, 0.06 + riser, zs + 0.004);
+        bx(b, 'metal_yellow', m, -0.6, 0.06 + riser - 0.028, zs + run - 0.04, 0.6, 0.067 + riser, zs + run);
+        bx(b, 'metal_yellow', m, -0.6, 0.06 + riser - 0.028, zs, -0.56, 0.067 + riser, zs + run);
+        bx(b, 'metal_yellow', m, 0.56, 0.06 + riser - 0.028, zs, 0.6, 0.067 + riser, zs + run);
+      };
+      const mv = addMover(world, l, ctx, step, null);
+      if (!mv) return;
+      const treads = [mv.outer];
+      for (let k = 1; k <= n; k++) { const c = mv.outer.clone(); mv.outer.parent.add(c); treads.push(c); }
+      const c = Math.cos(p.rot), sn = Math.sin(p.rot), speed = o.speed ?? 0.7, dir = o.down ? -1 : 1;
+      mv.update = (dt, t) => {
+        const u = (((dir * t * speed) / run) % 1 + 1) % 1;
+        for (let k = 0; k < treads.length; k++) {
+          const f = k - 1 + u;                            // steps from the bottom of the run
+          const tr = treads[k];
+          tr.visible = f >= 0 && f <= n - 1;
+          const dz = f * run, dy = f * riser;
+          tr.position.set(dz * sn, dy, dz * c);
+        }
+      };
+      void rng;
     },
   },
   mirror_panel: {
@@ -11425,19 +11579,60 @@ function addProp(l, type, x, y, z, rot, opts = {}, seed = 0) {
       const a = worldAABB(c, x, y, z, rot, p.scale);
       const col = makeCollider(a[0], a[1], a[2], a[3], a[4], a[5], opts.flags ?? (C.SOLID | C.PLATFORM | (opts.occlude ? C.OCCLUDE : 0)));
       col.owner = p;
+      // what this collider does to whoever stands on it (see Player.carry)
+      if (c[6] === 'spin' && !opts.still) col.carry = { spin: def.spin || 0.4, x, z };
+      else if (c[6] === 'belt') col.carry = { belt: (opts.speed ?? 0.7) * (opts.down ? -1 : 1), dx: Math.sin(rot), dz: Math.cos(rot) };
       l.colliders.add(col);
     }
+  }
+  if (def.light && l.fixtures && !opts.dark) {
+    const L = def.light;
+    l.fixtures.push({ x, y: y + L.y, z, type: 'bulb', emit: 'omni', frame: false, color: L.color, intensity: L.intensity, flicker: FLICKER.STEADY, soft: 0.6, range: L.range });
   }
   if (def.hide) p.hide = true;
   return p;
 }
 
-function buildProps(l, b, rngFactory) {
+/**
+ * Moving parts. build(b) fills a fresh GeometryBuilder in world space; the result is
+ * light-baked like the chunk, hung under ctx.dynamic and turned about the pivot
+ * (pivot = the prop, or null for a mover that only translates). update(dt, t) is
+ * called every frame by World.update until the chunk is disposed.
+ */
+function addMover(world, l, ctx, build, pivot) {
+  if (!world || !ctx || !ctx.dynamic) return null;
+  const b = new GeometryBuilder(world.lib);
+  build(b);
+  const inner = b.finalize(world.makeBakeCtx(l), (key) => world.lib.get(key, 'vertex'));
+  const outer = new THREE.Group();
+  if (pivot) { outer.position.set(pivot.x, pivot.y, pivot.z); inner.position.set(-pivot.x, -pivot.y, -pivot.z); }
+  outer.add(inner);
+  ctx.dynamic.add(outer);
+  const mv = { outer, inner, update() {} };
+  world.movers.add(mv);
+  (ctx.objects || (ctx.objects = [])).push({ dispose() { world.movers.delete(mv); } });
+  return mv;
+}
+
+/** A second moving part that rides along with a mover (a carousel horse on its pole). */
+function attachPart(world, l, mv, build, pivot) {
+  const b = new GeometryBuilder(world.lib);
+  build(b);
+  const g = b.finalize(world.makeBakeCtx(l), (key) => world.lib.get(key, 'vertex'));
+  g.position.set(-pivot.x, -pivot.y, -pivot.z);
+  mv.outer.add(g);
+  return g;
+}
+
+function buildProps(l, b, rngFactory, world = null, ctx = null) {
   for (const p of l.props) {
     const def = PROPS[p.type];
     if (!def) continue;
     const m = propMatrix(p.x, p.y, p.z, p.rot, p.scale);
     def.build(b, m, rngFactory(p.seed), p.opts);
+    if (def.dynamic && world && ctx) {
+      try { def.dynamic(world, l, ctx, p, m, rngFactory(p.seed ^ 0x6d0f), p.opts); } catch (e) { console.warn('moving prop', p.type, e); }
+    }
   }
 }
 
@@ -11916,6 +12111,7 @@ function placeProps(world, l, rng, set, P, y = 0) {
 __e['propMatrix'] = propMatrix;
 __e['addProp'] = addProp;
 __e['buildProps'] = buildProps;
+__e['addMover'] = addMover;
 __e['spaceFree'] = spaceFree;
 __e['wallSlots'] = wallSlots;
 __e['addContainer'] = addContainer;
@@ -15196,7 +15392,7 @@ function makeForestGen(p = {}) {
       if (P.props) placeProps(world, l, rng, P.props, P, 0);
     },
 
-    build(world, l, b) {
+    build(world, l, b, ctx) {
       const N = world.N, S = world.S;
       for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
         if (l.void && l.void[i + j * N]) continue;     // the cut: no ground to stand on
@@ -15218,7 +15414,7 @@ function makeForestGen(p = {}) {
         b.box('metal_dark', x - 0.14, 3.0, z - 0.14, x + 0.14, 3.04, z + 0.14, {});
         b.box('fixture_bulb', x - 0.09, 3.04, z - 0.09, x + 0.09, 3.2, z + 0.09, { slot: l.fixtures[l.fixtures.length - 1].slot });
       }
-      buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)));
+      buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)), world, ctx);
     },
 
     ao(world, l, x, y, z, nx, ny) {
@@ -15979,7 +16175,7 @@ function placeFeatures(world, l, rng, P) {
 function buildFeatures(world, l, b, ctx, P) {
   const H = (P && P.height) || 2.75;
   // every prop placed by the level generator or by a feature above
-  buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)));
+  buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)), world, ctx);
 
   for (const f of l.features || []) {
     if (f.kind === 'pool') { if (f.deep) buildDeepPool(b, f); else buildPool(b, f); }
@@ -16913,7 +17109,7 @@ function makeOpenGen(mode, p = {}) {
       }
     },
 
-    build(world, l, b) {
+    build(world, l, b, ctx) {
       if (mode === 'suburbs') buildSuburbs(world, l, b, P);
       else if (mode === 'city') buildCity(world, l, b, P);
       else if (mode === 'field') buildField(world, l, b, P);
@@ -16924,7 +17120,7 @@ function makeOpenGen(mode, p = {}) {
       else if (mode === 'lot') buildLot(world, l, b, P);
       else buildOcean(world, l, b, P);
       for (const t of l.trees) buildTree(b, t);
-      buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)));
+      buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)), world, ctx);
       buildWetness(world, l, b);
     },
 
@@ -18788,6 +18984,7 @@ class Player {
   reset(x, z, y = 0) {
     this.pos.set(x, y + 0.05, z);
     this.vel.set(0, 0, 0);
+    this.standOn = null;
     this.yaw = Math.PI * 0.25;
     this.pitch = 0;
     this.stance = 'stand';
@@ -18873,6 +19070,7 @@ class Player {
     const fallSpeed = this.vel.y;
 
     // ------------------------------------------------------------- integrate
+    this.carry(dt);
     this.pos.y += this.vel.y * dt;
     const sub = Math.min(4, 1 + Math.floor(Math.hypot(this.vel.x, this.vel.z) * dt / 0.14));
     const sdt = dt / sub;
@@ -18993,6 +19191,28 @@ class Player {
     this.stance = want;
   }
 
+  /**
+   * Whatever the player stands on can move them: a carousel deck turns them (and
+   * their view) round its centre, an escalator step carries them up the incline.
+   * The step colliders do not move - the next step is only a riser higher, so
+   * being carried into it simply steps the player up.
+   */
+  carry(dt) {
+    const cr = this.onGround && this.standOn && this.standOn.carry;
+    if (!cr || this.game.rideLock) return;
+    if (cr.spin) {
+      const a = cr.spin * dt, rx = this.pos.x - cr.x, rz = this.pos.z - cr.z, c = Math.cos(a), s = Math.sin(a);
+      this.pos.x = cr.x + rx * c + rz * s;
+      this.pos.z = cr.z - rx * s + rz * c;
+      this.yaw += a;
+    } else if (cr.belt) {
+      this.pos.x += cr.dx * cr.belt * dt;
+      this.pos.z += cr.dz * cr.belt * dt;
+      if (!this.beltToast && this.game.hud) { this.beltToast = true; this.game.hud.toast('The escalator is still running.', 1800); }
+    }
+    this.resolveHorizontal();
+  }
+
   resolveHorizontal() {
     const r = RADIUS;
     const feet = this.pos.y, head = this.pos.y + this.bodyH;
@@ -19018,20 +19238,22 @@ class Player {
     // the level floor and ceiling are geometry, not colliders: the generator
     // reports the floor height (groundAt) and the walk height comes from the gen
     const cols = this.world.queryColliders(this.pos.x - r, this.pos.z - r, this.pos.x + r, this.pos.z + r, this.tmp2);
-    let ground = this.world.groundAt(this.pos.x, this.pos.z), ceil = Infinity;
+    let ground = this.world.groundAt(this.pos.x, this.pos.z), ceil = Infinity, on = null;
     for (const c of cols) {
       if (!c.enabled) continue;
       if (!(c.flags & (C.SOLID | C.PLATFORM))) continue;
       if (!circleBoxPush(this.pos.x, this.pos.z, r * 0.92, c)) continue;
-      if (c.maxY <= this.pos.y + STEP + 0.02 && c.maxY > ground) ground = c.maxY;
+      if (c.maxY <= this.pos.y + STEP + 0.02 && c.maxY > ground) { ground = c.maxY; on = c; }
       if (c.minY >= this.pos.y + 0.4 && c.minY < ceil) ceil = c.minY;
     }
     if (ground > -Infinity && this.pos.y <= ground + 0.02) {
       this.pos.y = ground;
       if (this.vel.y < 0) this.vel.y = 0;
       this.onGround = true;
+      this.standOn = on;
     } else {
       this.onGround = false;
+      this.standOn = null;
     }
     if (ceil < Infinity && this.pos.y + this.bodyH > ceil) {
       this.pos.y = ceil - this.bodyH;
