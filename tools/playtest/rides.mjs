@@ -6,7 +6,11 @@
 //   * an escalator's steps carry the player up the incline to the top landing
 //     without a single key pressed.
 //
-//   node tools/playtest/rides.mjs            pg07 (carousel) and pg10 (escalators)
+//   * a slide is ridden to each of its endings: the safe ones (door, lobby,
+//     hatch) put the player back on their feet, the bad ones (jaws, grinder,
+//     whirlpool, drop) kill.
+//
+//   node tools/playtest/rides.mjs            pg07 (carousel), pg10 (escalators), pg04 (slides)
 //   node tools/playtest/rides.mjs pg10       one level
 // ============================================================================
 import { bootGame } from './boot.mjs';
@@ -16,7 +20,7 @@ if (!b.game) { console.log('BOOT FAILED'); process.exit(1); }
 const { game, clock, LEVELS, input, problems } = b;
 
 const asked = process.argv.slice(2);
-const list = asked.length ? asked : ['pg07', 'pg10'];
+const list = asked.length ? asked : ['pg07', 'pg10', 'pg04'];
 let bad = 0;
 
 function propsOf(type) {
@@ -40,9 +44,27 @@ for (const id of list) {
   game.entities.update = () => {};
 
   const world = game.world;
+  const slides = game.objectives.goals.filter((g) => g.type === 'slide');
+  if (slides.length) {
+    const g = slides[0];
+    for (const ending of ['door', 'lobby', 'hatch', 'jaws', 'grinder', 'whirlpool', 'drop']) {
+      const safe = ['door', 'lobby', 'hatch'].includes(ending);
+      game.state = 'play'; pl.dead = false; pl.health = 100;
+      let landed = false;
+      pl.pos.set(g.x + Math.sin(g.rot) * 1.3, g.y, g.z + Math.cos(g.rot) * 1.3);
+      game.ride(g, safe, 5, () => { landed = true; }, ending);
+      let n = 0;
+      while (game.rideLock && n++ < 60 * 20) await clock.settle(1);
+      const died = game.state === 'dead';
+      const ok = safe ? landed && !died : died;
+      console.log(`${ok ? 'ok  ' : 'FAIL'} ${id} slide ending '${ending}': ${died ? 'died' : landed ? 'climbed out' : 'still riding'} after ${(n / 60).toFixed(1)} s`);
+      if (!ok) bad++;
+      if (died) { game.respawn(); await clock.settle(2); }
+    }
+  }
   const carousels = propsOf('carousel'), escalators = propsOf('escalator');
-  if (!carousels.length && !escalators.length) { console.log(`FAIL ${id}: no carousel or escalator was generated`); bad++; continue; }
-  if (!world.movers.size) { console.log(`FAIL ${id}: nothing is moving (no movers registered)`); bad++; continue; }
+  if (!carousels.length && !escalators.length && !slides.length) { console.log(`FAIL ${id}: no carousel or escalator was generated`); bad++; continue; }
+  if (!slides.length && !world.movers.size) { console.log(`FAIL ${id}: nothing is moving (no movers registered)`); bad++; continue; }
 
   const sp = lv.spawn || [16, 16];
   const near = (a) => a.slice().sort((p, q) => Math.hypot(p.x - sp[0], p.z - sp[1]) - Math.hypot(q.x - sp[0], q.z - sp[1])).slice(0, 2);

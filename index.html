@@ -12581,7 +12581,8 @@ const GOAL_INFO = {
   keypad: { wall: true, depth: 0.12, prompt: 'Enter the access code', color: '#3dff7a' },
   portal_window: { wall: true, depth: 0.2, prompt: 'Climb through the window', color: '#ffffff' },
   musicbox: { wall: false, size: 0.5, prompt: 'Wind the music box', color: '#ffb0d0' },
-  slide: { wall: false, size: 1.6, prompt: 'Sit down and push off', color: '#7fd6ff', reach: 7, big: true },
+  slide: { wall: true, depth: 0.8, size: 1.6, prompt: 'Climb into the slide', color: '#7fd6ff', reach: 4.5 },
+  escalator: { wall: false, size: 3.6, prompt: 'Go through the door at the top', color: '#3dff7a', reach: 10, big: true },
   stairs: { wall: false, size: 3.6, prompt: 'Open the stairwell door', color: '#3dff7a', reach: 10, big: true },
   stairshaft: { wall: false, size: 3.2, prompt: 'Open the stairwell door', color: '#3dff7a', reach: 4.5, big: true },
 };
@@ -12625,6 +12626,103 @@ function signTex(text, color, w = 512, h = 160) {
     g.font = `bold ${Math.floor(h * 0.62)}px Arial, sans-serif`;
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText(text, w / 2, h / 2 + 4);
+  });
+}
+
+/**
+ * The paint round a slide's mouth. Every slide in a row gets tags, drips and a
+ * few distractions (arrows, entity faces); the puzzle fields decide what the
+ * clue note talks about: `mark` (a symbol over the hole), `face` (an entity
+ * face painted beside it) and `arrows` (how many arrows point at the hole).
+ * The canvas maps onto a 3.0 x 2.6 m plane whose centre is 1.3 m up the wall;
+ * the hole is at 0.9 m, i.e. (256, 293) on the 512 x 448 canvas.
+ */
+const SLIDE_MARKS = ['crown', 'star', 'spiral', 'eye', 'hand', 'moon', 'skull', 'heart'];
+function graffitiTex(o) {
+  const seed = (o.seed || 1) >>> 0;
+  let st = seed || 1;
+  const rnd = () => { st ^= st << 13; st >>>= 0; st ^= st >>> 17; st ^= st << 5; st >>>= 0; return st / 4294967296; };
+  const pick = (a) => a[Math.floor(rnd() * a.length)];
+  const CX = 256, CY = 293, HR = 126;
+  const inks = ['#ff3a6e', '#3af0ff', '#ffe23a', '#7dff4a', '#ff8a1a', '#c86bff', '#ffffff'];
+  return canvasTex(512, 448, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    const spray = (col, width, fn) => {
+      g.save(); g.strokeStyle = col; g.fillStyle = col; g.lineWidth = width; g.shadowColor = col; g.shadowBlur = width * 1.6;
+      g.beginPath(); fn(); g.stroke(); g.restore();
+    };
+    const drip = (x, y, col) => {
+      g.save(); g.strokeStyle = col; g.globalAlpha = 0.7; g.lineWidth = 2.5;
+      const n = 1 + Math.floor(rnd() * 3);
+      for (let i = 0; i < n; i++) { const dx = x + (rnd() - 0.5) * 30; g.beginPath(); g.moveTo(dx, y); g.lineTo(dx, y + 12 + rnd() * 46); g.stroke(); }
+      g.restore();
+    };
+    const outside = (x, y, pad = 18) => Math.hypot(x - CX, y - CY) > HR + pad;
+    // tags and squiggles: noise round the hole, nothing to read into
+    for (let k = 0; k < 7; k++) {
+      const col = pick(inks), x = 40 + rnd() * 430, y = 40 + rnd() * 370;
+      if (!outside(x, y, 40)) continue;
+      g.save(); g.globalAlpha = 0.55 + rnd() * 0.3;
+      spray(col, 5 + rnd() * 6, () => {
+        g.moveTo(x, y);
+        for (let i = 0; i < 6; i++) g.quadraticCurveTo(x + (rnd() - 0.5) * 90, y + (rnd() - 0.5) * 60, x + (rnd() - 0.2) * 80, y + (rnd() - 0.5) * 50);
+      });
+      g.restore();
+      if (rnd() < 0.5) drip(x, y + 10, col);
+    }
+    // arrows that point at the hole, from wherever they were painted
+    const arrow = (ang, col) => {
+      const r0 = HR + 120, r1 = HR + 26;
+      const x0 = CX + Math.cos(ang) * r0, y0 = CY + Math.sin(ang) * r0, x1 = CX + Math.cos(ang) * r1, y1 = CY + Math.sin(ang) * r1;
+      const a = Math.atan2(y1 - y0, x1 - x0);
+      spray(col, 9, () => {
+        g.moveTo(x0, y0); g.quadraticCurveTo((x0 + x1) / 2 + Math.sin(ang) * 22, (y0 + y1) / 2 - Math.cos(ang) * 22, x1, y1);
+        g.moveTo(x1, y1); g.lineTo(x1 - Math.cos(a - 0.5) * 30, y1 - Math.sin(a - 0.5) * 30);
+        g.moveTo(x1, y1); g.lineTo(x1 - Math.cos(a + 0.5) * 30, y1 - Math.sin(a + 0.5) * 30);
+      });
+    };
+    const nArrows = o.arrows ?? 0;
+    const angs = [-2.4, -0.7, 2.6, 0.5, -1.57, 3.14, 0.0];
+    for (let i = 0; i < nArrows; i++) arrow(angs[(i + (seed & 3)) % angs.length] + (rnd() - 0.5) * 0.3, pick(inks));
+    // an entity's face, sprayed beside the hole
+    const face = (kind, x, y, s) => {
+      const col = pick(['#ffffff', '#ffe23a', '#ff3a6e']);
+      if (kind === 'grin') {
+        spray(col, 5, () => { g.ellipse(x - s * 0.35, y - s * 0.3, s * 0.18, s * 0.07, -0.25, 0, 6.3); });
+        spray(col, 5, () => { g.ellipse(x + s * 0.35, y - s * 0.3, s * 0.18, s * 0.07, 0.25, 0, 6.3); });
+        spray(col, 6, () => { g.moveTo(x - s * 0.7, y + s * 0.05); g.quadraticCurveTo(x, y + s * 0.85, x + s * 0.7, y + s * 0.05); g.quadraticCurveTo(x, y + s * 0.35, x - s * 0.7, y + s * 0.05); });
+        for (let i = -5; i <= 5; i++) spray(col, 3, () => { g.moveTo(x + i * s * 0.11, y + s * (0.2 + 0.2 * (1 - Math.abs(i) / 6))); g.lineTo(x + i * s * 0.11, y + s * (0.42 + 0.18 * (1 - Math.abs(i) / 6))); });
+      } else if (kind === 'eyes') {
+        for (let i = 0; i < 7; i++) {
+          const ex = x + (rnd() - 0.5) * s * 1.6, ey = y + (rnd() - 0.5) * s * 1.2, er = s * (0.1 + rnd() * 0.1);
+          spray(col, 4, () => { g.ellipse(ex, ey, er * 1.6, er, 0, 0, 6.3); });
+          g.save(); g.fillStyle = col; g.beginPath(); g.arc(ex, ey, er * 0.45, 0, 6.3); g.fill(); g.restore();
+        }
+      } else {
+        spray(col, 6, () => { g.arc(x, y, s * 0.7, 0, 6.3); });
+        spray(col, 6, () => { g.moveTo(x - s * 0.3, y - s * 0.3); g.lineTo(x - s * 0.15, y - s * 0.15); g.moveTo(x + s * 0.15, y - s * 0.3); g.lineTo(x + s * 0.3, y - s * 0.15); });
+        spray(col, 6, () => { g.arc(x, y + s * 0.1, s * 0.4, 0.3, Math.PI - 0.3); });
+      }
+      drip(x, y + s * 0.7, col);
+    };
+    if (o.face) face(o.face, rnd() < 0.5 ? 70 : 440, 120 + rnd() * 180, 52);
+    // the mark over the hole
+    const mark = (kind, x, y, s, col) => {
+      if (kind === 'crown') spray(col, 7, () => { g.moveTo(x - s, y + s * 0.5); g.lineTo(x - s, y - s * 0.4); g.lineTo(x - s * 0.5, y + s * 0.1); g.lineTo(x, y - s * 0.6); g.lineTo(x + s * 0.5, y + s * 0.1); g.lineTo(x + s, y - s * 0.4); g.lineTo(x + s, y + s * 0.5); g.closePath(); });
+      else if (kind === 'star') spray(col, 7, () => { for (let i = 0; i <= 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? s * 0.42 : s; g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } });
+      else if (kind === 'spiral') spray(col, 6, () => { for (let i = 0; i < 60; i++) { const a = i * 0.32, r = s * i / 60; g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } });
+      else if (kind === 'eye') { spray(col, 7, () => { g.moveTo(x - s, y); g.quadraticCurveTo(x, y - s * 0.9, x + s, y); g.quadraticCurveTo(x, y + s * 0.9, x - s, y); }); g.save(); g.fillStyle = col; g.beginPath(); g.arc(x, y, s * 0.28, 0, 6.3); g.fill(); g.restore(); }
+      else if (kind === 'hand') spray(col, 7, () => { g.moveTo(x - s * 0.5, y + s); g.lineTo(x - s * 0.5, y); for (let f = 0; f < 4; f++) { const fx = x - s * 0.5 + f * s * 0.33; g.lineTo(fx, y - s * 0.9); g.lineTo(fx + s * 0.16, y - s * 0.9); g.lineTo(fx + s * 0.16, y); } g.lineTo(x + s * 0.5, y + s * 0.2); g.lineTo(x + s * 0.9, y - s * 0.3); g.lineTo(x + s * 0.5, y + s); });
+      else if (kind === 'moon') spray(col, 7, () => { g.arc(x, y, s * 0.8, 0.6, Math.PI * 2 - 0.6); g.arc(x + s * 0.4, y, s * 0.6, Math.PI * 2 - 0.9, 0.9, true); });
+      else if (kind === 'skull') { spray(col, 7, () => { g.arc(x, y - s * 0.1, s * 0.7, Math.PI * 0.85, Math.PI * 2.15); g.lineTo(x + s * 0.4, y + s * 0.8); g.lineTo(x - s * 0.4, y + s * 0.8); g.closePath(); }); g.save(); g.fillStyle = col; for (const sx of [-1, 1]) { g.beginPath(); g.arc(x + sx * s * 0.28, y, s * 0.17, 0, 6.3); g.fill(); } g.restore(); }
+      else if (kind === 'heart') spray(col, 7, () => { g.moveTo(x, y + s * 0.8); g.bezierCurveTo(x - s * 1.3, y, x - s * 0.6, y - s, x, y - s * 0.35); g.bezierCurveTo(x + s * 0.6, y - s, x + s * 1.3, y, x, y + s * 0.8); });
+      drip(x, y + s * 0.7, col);
+    };
+    if (o.mark) mark(o.mark, CX + (rnd() - 0.5) * 60, 58, 40, pick(inks));
+    // a dark ring of grime where hands and shoes have rubbed round the mouth
+    g.save(); g.globalAlpha = 0.35; g.strokeStyle = '#1a140c'; g.lineWidth = 22; g.shadowColor = '#000'; g.shadowBlur = 30;
+    g.beginPath(); g.arc(CX, CY, HR + 8, 0, 6.3); g.stroke(); g.restore();
   });
 }
 
@@ -12887,7 +12985,9 @@ class Goal {
       this.box(wood, -0.72, 0.76, 0, 0.72, 0.8, 0.3);
       P.view = this.add(xf(new THREE.PlaneGeometry(1.16, 1.36), { y: 1.56, z: 0.02 }), glowMat('#ffffff', { map: viewTex(this.opts && this.opts.view), fog: false }));
       P.view.material.color.setRGB(0.75, 0.75, 0.75);
-    } else if (t === 'slide' || t === 'stairs' || t === 'stairshaft') {
+    } else if (t === 'slide') {
+      this.buildSlideMouth();
+    } else if (t === 'stairs' || t === 'stairshaft' || t === 'escalator') {
       this.buildStructure(t);
     } else if (t === 'musicbox') {
       this.add(xf(new THREE.CylinderGeometry(0.04, 0.05, 0.75, 10), { y: 0.375 }), 'wood_dark');
@@ -12968,27 +13068,101 @@ class Goal {
       this.collider(-dw, R, -3.4, dw, R + 2.2, -3.2);
     } else if (t === 'stairshaft') {
       this.buildStairwell(P, tints[hue], glows[hue]);
-    } else {
-      // a slide tower: ten steps up to a launch platform, a numbered arch, and a chute of
-      // moulded plastic running away from it downhill into a tunnel mouth. The ride itself
-      // carries you much farther than this (see Ride), and the plastic is what you ride on:
-      // opaque, printed, with just enough sheen to catch the park lights.
-      const len = this.opts.len || 8, H = 3.0, n = 10, run = 0.34, tint = tints[hue], glow = glows[hue];
-      const plastic = SLIDE_PLASTIC[hue % SLIDE_PLASTIC.length];
-      this.steps('metal_grey', -0.95, 0.95, 5.8, run, n, H, tint, 0.95, 1.1, 0.9);
-      this.box('metal_white', -1.1, 0, 0.4, 1.1, H, 2.4); this.collider(-1.1, 0, 0.4, 1.1, H, 2.4);
-      for (const [a, b] of [[-1.1, -0.95], [0.95, 1.1]]) { this.box(plastic, a, H, 0.4, b, H + 0.9, 2.4); this.collider(a, H, 0.4, b, H + 0.9, 2.4); }
-      for (const x of [-1.0, 0.88]) this.box(plastic, x, H, 0.3, x + 0.12, H + 2.3, 0.5);
-      this.box(plastic, -1.0, H + 2.2, 0.3, 1.0, H + 2.4, 0.5);
-      this.glowSign(String(this.opts.num || 1), glow, 0.5, 0.4, H + 2.0, 0.52);
-      const drop = H - 0.55, l = Math.hypot(len, drop), ang = Math.atan2(drop, len), cy = (H + 0.55) / 2 - 0.02, cz = 0.4 - len / 2;
-      // the chute: a solid plastic bed, plastic side walls, and the surface you ride on
-      this.add(xf(new THREE.BoxGeometry(1.6, 0.08, l), { y: cy, z: cz, rx: -ang }), plastic);
-      for (const x of [-0.8, 0.8]) this.add(xf(new THREE.BoxGeometry(0.1, 0.5, l), { x, y: cy + 0.22, z: cz, rx: -ang }), plastic);
-      P.chute = this.add(xf(new THREE.PlaneGeometry(1.45, l), { y: cy + 0.055, z: cz, rx: -Math.PI / 2 - ang }), plastic);
-      this.box(tint, -1.5, 0, -len - 1.3, 1.5, 2.4, -len - 0.2); this.collider(-1.5, 0, -len - 1.3, 1.5, 2.4, -len - 0.2);
-      this.add(xf(new THREE.PlaneGeometry(1.5, 1.5), { y: 1.15, z: -len - 0.19 }), glowMat('#000000'));
+    } else if (t === 'escalator') {
+      this.buildEscalatorGoal(P, tints[hue], glows[hue]);
     }
+  }
+
+  /**
+   * A slide, the way the backrooms build them: all you ever see is the mouth, a
+   * moulded plastic tube end standing out of the wall, with spray paint all round
+   * it. The ride itself happens inside (see Ride). Wall goal: the wall is the
+   * local z = 0 plane and the mouth sticks out toward +z. A slide that found no
+   * wall (opts.freestanding) brings a short stretch of plastic panel wall with it.
+   */
+  buildSlideMouth() {
+    const P = this.parts, o = this.opts, hue = (o.hue || 0) % SLIDE_PLASTIC.length;
+    const plastic = SLIDE_PLASTIC[hue];
+    const cols = [0xb3b9c4, 0xdb4034, 0x3d8ee0, 0xe8c22a, 0x3fc468, 0xe07c26];
+    const Y = 0.9, R = 0.62, D = 0.72;
+    if (o.freestanding) {
+      this.box('plastic_white', -1.6, 0, -0.32, 1.6, 2.9, -0.02);
+      this.box(plastic, -1.66, 0, -0.36, -1.6, 2.9, 0.02); this.box(plastic, 1.6, 0, -0.36, 1.66, 2.9, 0.02);
+      this.box(plastic, -1.66, 2.9, -0.36, 1.66, 3.0, 0.02);
+      this.collider(-1.66, 0, -0.36, 1.66, 3.0, 0.0);
+    }
+    // the paint on the wall round it
+    P.paint = this.add(xf(new THREE.PlaneGeometry(3.0, 2.6), { y: 1.3, z: 0.015 }), new THREE.MeshBasicMaterial({ map: graffitiTex(o), transparent: true, depthWrite: false }));
+    P.paint.renderOrder = 2;
+    // the tube end: a plastic sleeve out of the wall, a rolled lip, and a dark throat
+    const sleeve = this.add(xf(new THREE.CylinderGeometry(R + 0.06, R + 0.1, D, 28, 1, true), { y: Y, z: D / 2, rx: Math.PI / 2 }), plastic);
+    void sleeve;
+    this.add(xf(new THREE.TorusGeometry(R + 0.03, 0.075, 10, 32), { y: Y, z: D }), plastic);
+    this.add(xf(new THREE.TorusGeometry(R + 0.12, 0.04, 8, 32), { y: Y, z: 0.03 }), plastic);
+    const throat = canvasTex(64, 256, (g, w, h) => {
+      const gr = g.createLinearGradient(0, 0, 0, h);
+      const c = '#' + cols[hue].toString(16).padStart(6, '0');
+      gr.addColorStop(0, '#000000'); gr.addColorStop(0.55, '#000000'); gr.addColorStop(0.9, c); gr.addColorStop(1, c);
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+      g.globalAlpha = 0.18; g.fillStyle = '#ffffff';
+      for (let y = h * 0.6; y < h; y += 22) g.fillRect(0, y, w, 3);
+    });
+    P.throat = this.add(xf(new THREE.CylinderGeometry(R, R, D + 0.1, 28, 1, true), { y: Y, z: (D - 0.1) / 2, rx: Math.PI / 2 }), new THREE.MeshBasicMaterial({ map: throat, side: THREE.BackSide }));
+    this.add(xf(new THREE.CircleGeometry(R, 28), { y: Y, z: -0.09 }), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+    // a scuffed plastic step under the mouth, the bolts of the flange and the slide's number
+    this.box(plastic, -0.7, 0, 0, 0.7, 0.24, 0.95);
+    this.box('rubber_black', -0.62, 0.24, 0.55, 0.62, 0.25, 0.92);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      this.add(xf(new THREE.CylinderGeometry(0.025, 0.025, 0.03, 6), { x: Math.cos(a) * (R + 0.12), y: Y + Math.sin(a) * (R + 0.12), z: 0.07, rx: Math.PI / 2 }), 'chrome');
+    }
+    this.glowSign(String(o.num || 1), '#' + cols[hue].toString(16).padStart(6, '0'), 0.3, 0.24, Y + R + 0.32, 0.04);
+    this.collider(-0.78, 0, 0, 0.78, Y + R + 0.18, D + 0.08);
+    this.paintMats = [P.paint.material, P.throat.material];
+  }
+
+  /**
+   * An escalator up to a door: a running escalator (its steps carry you) climbing
+   * toward -z to a landing with the door in the back wall, enclosed like the
+   * stairs. Same footprint as 'stairs', so it fits anywhere a stairwell does.
+   */
+  buildEscalatorGoal(P, wall, glow) {
+    const R = this.opts.rise || 3.2, n = Math.max(12, Math.round(R / 0.2)), SL = 7.6, run = SL / n, zNear = -1.6 + SL, WH = 3.4;
+    const hw = 0.8, wt = 0.2, dw = 0.5;
+    this.stairLen = zNear;
+    // landing plate at the foot, the steps (colliders that carry you), balustrades, handrails
+    this.box('metal_grey', -hw, 0, zNear, hw, 0.06, zNear + 0.9);
+    this.box('hazard', -hw + 0.1, 0.06, zNear, hw - 0.1, 0.065, zNear + 0.12);
+    const speed = this.opts.speed ?? 0.7, c = Math.cos(this.rot), sn = Math.sin(this.rot);
+    for (let k = 0; k < n; k++) {
+      const z1 = zNear - k * run, z0 = z1 - run, top = R * (k + 1) / n;
+      this.collider(-hw + 0.1, 0, z0, hw - 0.1, top, z1);
+      this.colliders[this.colliders.length - 1].carry = { belt: speed, dx: -sn, dz: -c };
+      for (const [a, b] of [[-hw - wt, -hw + 0.1], [hw - 0.1, hw + wt]]) { this.box(wall, a, 0, z0, b, top + 0.95, z1); this.collider(a, 0, z0, b, top + 0.95, z1); }
+    }
+    const L = Math.hypot(SL, R), ang = Math.atan2(R, SL);
+    for (const x of [-hw + 0.05, hw - 0.05]) this.add(xf(new THREE.BoxGeometry(0.1, 0.07, L), { x, y: R / 2 + 1.0, z: zNear - SL / 2, rx: ang }), 'rubber_black');
+    this.add(xf(new THREE.BoxGeometry(hw * 2 - 0.2, 0.06, L), { y: R / 2 - 0.28, z: zNear - SL / 2, rx: ang }), 'metal_dark');
+    // the moving treads: a row of plates that loop up the incline
+    P.treads = [];
+    for (let k = 0; k <= n; k++) { const t = this.box('steel', -hw + 0.12, -0.03, -run, hw - 0.12, 0, 0); P.treads.push(t); }
+    P.tread = { n, run, rise: R / n, zNear, speed };
+    // the landing, the walls round it and the door
+    this.box('metal_grey', -hw, 0, -3.4, hw, R, -1.6); this.collider(-hw, 0, -3.4, hw, R, -1.6);
+    for (const [a, b] of [[-hw - wt, -hw], [hw, hw + wt]]) { this.box(wall, a, 0, -3.4, b, R + WH, -1.6); this.collider(a, 0, -3.4, b, R + WH, -1.6); }
+    this.box(wall, -hw - wt, R + WH - 0.2, -3.4, hw + wt, R + WH, zNear + 0.9);
+    for (const [a, b] of [[-hw - wt, -dw], [dw, hw + wt]]) { this.box(wall, a, 0, -3.4, b, R + WH, -3.2); this.collider(a, 0, -3.4, b, R + WH, -3.2); }
+    this.box(wall, -dw, R + 2.17, -3.4, dw, R + WH, -3.2);
+    this.box('void_black', -dw, R, -3.4, dw, R + 2.17, -3.3);
+    this.box('metal_dark', -dw - 0.02, R, -3.4, -dw + 0.06, R + 2.25, -3.2);
+    this.box('metal_dark', dw - 0.06, R, -3.4, dw + 0.02, R + 2.25, -3.2);
+    P.portal = this.add(xf(new THREE.PlaneGeometry(1.0, 2.17), { y: R + 1.085, z: -3.29 }), glowMat('#fffdf2', { fog: false }));
+    P.portal.visible = false;
+    P.leaf = this.pivot(-dw + 0.03, R, -3.24);
+    this.box('metal_grey', 0, 0.005, -0.025, dw * 2 - 0.06, 2.16, 0.025, P.leaf);
+    this.box('chrome', 0.15, 1.0, 0.025, dw * 2 - 0.12, 1.05, 0.06, P.leaf);
+    this.glowSign('EXIT', glow, 0.55, 0.2, R + 2.35, -3.19);
+    this.collider(-dw, R, -3.4, dw, R + 2.2, -3.2);
   }
   /**
    * A narrow stair shaft: ONE stairwell, every flight of it. Two lanes of concrete
@@ -13088,7 +13262,8 @@ class Goal {
     else if (t === 'keypad') { ly = 1.3; lz = 0.2; }
     else if (t === 'portal_window') { ly = 1.5; lz = 0.4; }
     else if (t === 'musicbox') { ly = 0.9; lz = 0.25; }
-    else if (t === 'slide') { ly = 3.0 + 1.45; lz = 0.7; }
+    else if (t === 'slide') { ly = 0.9; lz = 0.85; }
+    else if (t === 'escalator') { ly = (this.opts.rise || 3.2) + 1.6; lz = -3.15; }
     else if (t === 'stairs') { ly = (this.opts.rise || 3) + 1.6; lz = -3.15; }
     else if (t === 'stairshaft') { ly = (this.opts.rise || 2.8) * Math.max(2, 2 * Math.round((this.opts.flights || 6) / 2)) + 1.7; lz = 4.0; }
     else if (t === 'valve') { ly = 1.2; lz = 0.45; }
@@ -13113,6 +13288,20 @@ class Goal {
       const L = this.game.world.sampleLight(this.x, this.y + 1.2, this.z);
       const k = this.game.lights.globalDim;
       setLight(this.mats, L[0] * k + 0.004, L[1] * k + 0.004, L[2] * k + 0.004);
+      // spray paint and the throat are unlit materials: fluorescent paint, so it never quite goes black
+      if (this.paintMats) {
+        const v = (x) => Math.min(1, 0.32 + x * k * 2.2);
+        this.paintMats[0].color.setRGB(v(L[0]), v(L[1]), v(L[2]));
+        this.paintMats[1].color.setRGB(Math.min(1, 0.2 + L[0] * k * 2), Math.min(1, 0.2 + L[1] * k * 2), Math.min(1, 0.2 + L[2] * k * 2));
+      }
+    }
+    if (this.parts.tread) {
+      const T = this.parts.tread, u = (((performance.now() * 0.001 * T.speed) / T.run) % 1 + 1) % 1;
+      for (let k = 0; k < this.parts.treads.length; k++) {
+        const f = k - 1 + u, tr = this.parts.treads[k];
+        tr.visible = f >= 0 && f <= T.n - 1;
+        tr.position.set(0, (f + 1) * T.rise, T.zNear - f * T.run);
+      }
     }
     const P = this.parts, now = performance.now() * 0.001;
     if (P.flames && this.state === 'idle') for (const f of P.flames) f.scale.set(1, 0.8 + Math.random() * 0.5, 1);
@@ -13184,6 +13373,7 @@ function smooth(t) { return t * t * (3 - 2 * t); }
 
 __e['Goal'] = Goal;
 __e['GOAL_INFO'] = GOAL_INFO;
+__e['SLIDE_MARKS'] = SLIDE_MARKS;
 __e['GOAL_ELLIPSOID'] = ellipsoid;
   return __e;
 })();
@@ -13193,7 +13383,7 @@ const { RNG: RNG, hash32: hash32 } = __mod['src/core/rng.js'];
 const { EDGE: EDGE } = __mod['src/world/world.js'];
 const { FLICKER: FLICKER } = __mod['src/world/lights.js'];
 const { wallSlots: wallSlots, spaceFree: spaceFree } = __mod['src/world/props.js'];
-const { Goal: Goal, GOAL_INFO: GOAL_INFO } = __mod['src/game/goals.js'];
+const { Goal: Goal, GOAL_INFO: GOAL_INFO, SLIDE_MARKS: SLIDE_MARKS } = __mod['src/game/goals.js'];
 // Level objectives: places every stage's goal objects when the level loads,
 // tracks progress, runs stage effects (power cuts, rage, alarms, spawns),
 // feeds the HUD compass and rolls back timed stages when the player dies.
@@ -13245,9 +13435,27 @@ class Objectives {
         for (let k = 0; k < count; k++) extra.push({ color: cols[k % cols.length] });
       }
       if (def.pickSafe) {
+        // the slides of a row and the paint round them. One clue note tells you which
+        // mouth lets you live; everything else painted there is there to mislead you.
         const right = rng.int(0, count - 1);
-        for (let k = 0; k < count; k++) extra.push({ num: k + 1, hue: k + i, safe: k === right, len: def.slideLen || 8 });
+        const form = def.clue || rng.pick(['mark', 'noface', 'arrows']);
+        const marks = SLIDE_MARKS.slice(); rng.shuffle(marks);
+        const counts = Array.from({ length: count }, (_, k) => k); rng.shuffle(counts);
+        const faces = ['grin', 'eyes', 'smile'];
+        const bad = def.endings && def.endings.length ? def.endings : ['jaws', 'grinder', 'whirlpool', 'drop'];
+        st.puzzle = { form, mark: marks[right], arrows: form === 'arrows' ? counts[right] : 0 };
+        for (let k = 0; k < count; k++) {
+          const safe = k === right;
+          extra.push({
+            num: k + 1, hue: k + i, safe, len: def.slideLen || 8, seed: rng.int(1, 2 ** 30),
+            mark: form === 'mark' || rng.chance(0.5) ? marks[k] : null,
+            face: form === 'noface' ? (safe ? null : rng.pick(faces)) : (rng.chance(0.45) ? rng.pick(faces) : null),
+            arrows: form === 'arrows' ? counts[k] : rng.int(0, 2),
+            ending: safe ? rng.pick(['door', 'lobby', 'hatch']) : rng.pick(bad),
+          });
+        }
       }
+      if (def.goal === 'escalator') for (let k = 0; k < count; k++) extra.push({ rise: def.rise || 3.2, hue: i });
       if (def.goal === 'stairs') for (let k = 0; k < count; k++) extra.push({ rise: def.rise || 3, hue: i });
       if (def.goal === 'stairshaft') for (let k = 0; k < count; k++) extra.push({ rise: def.rise || 2.8, flights: def.flights || 6, hue: i });
       if (def.choose) {
@@ -13277,7 +13485,8 @@ class Objectives {
       if (st.targets.length) prev = [st.targets[0].x, st.targets[0].z];
       // clue notes scattered around where the stage starts
       for (const text of this.clueTexts(st, rng)) {
-        const a = rng.next() * TAU, d = rng.range((def.clueDist || [8, 34])[0], (def.clueDist || [8, 34])[1]);
+        const cd = def.clueDist || (def.pickSafe ? [5, 18] : [8, 34]);
+        const a = rng.next() * TAU, d = rng.range(cd[0], cd[1]);
         const g = this.place('note', from[0] + Math.cos(a) * d, from[1] + Math.sin(a) * d, from, rng, {});
         if (g) { g.text = text; g.title = def.clueTitle || 'A note'; st.clues.push(g); this.clues.push(g); }
       }
@@ -13307,6 +13516,21 @@ class Objectives {
     if (def.choose) {
       out.push(def.chooseClue || 'Every open window shows somewhere else.\nThe way home is yellow, and it hums.');
     }
+    if (def.pickSafe && st.puzzle) {
+      const pz = st.puzzle;
+      if (pz.form === 'mark') out.push(rng.pick([
+        `Written on the back of a ride ticket:\n"The arrows are lies. The faces are lies.\nGo in under the ${pz.mark}."`,
+        `Scratched into a bench:\n${pz.mark.toUpperCase()} = HOME\nevery other hole is hungry`,
+      ]));
+      else if (pz.form === 'noface') out.push(rng.pick([
+        `A lifeguard's note, soaked through:\n"They paint a face beside every slide that eats you.\nTake the one nobody has drawn on."`,
+        `In marker, on a napkin:\n"no face = no teeth.\ndon't trust the arrows"`,
+      ]));
+      else out.push(rng.pick([
+        `Someone kept count:\n"Ignore the pictures. Count the arrows pointing at the hole.\nThe one that lets you out has ${pz.arrows}."`,
+        `Torn from a park map:\n"${pz.arrows} arrow${pz.arrows === 1 ? '' : 's'}. Not more, not less. The rest go into the dark."`,
+      ]));
+    }
     for (const t of def.clues || []) out.push(t);
     return out;
   }
@@ -13321,9 +13545,9 @@ class Objectives {
   /** Stairwells and slide towers are long: they need a clear rectangle, and the ceiling above them is cut away. */
   placeBig(type, cx, cz, from, opts) {
     const w = this.world, S = w.S, sp = this.level.spawn || [16, 16];
-    const lens = type === 'stairshaft' ? [0] : (type === 'slide' ? [opts.len || 8, 5, 3] : [0]);
+    const lens = [0];
     for (const len of lens) {
-      const rect = type === 'stairshaft' ? [-1.4, 1.4, -4.4, 4.4] : (type === 'slide' ? [-1.5, 1.5, -(len + 1.4), 6.0] : [-1.6, 1.6, -3.6, 7.0]);
+      const rect = type === 'stairshaft' ? [-1.4, 1.4, -4.4, 4.4] : [-1.6, 1.6, -3.6, 7.0];
       const g0x = Math.floor(cx / S), g0z = Math.floor(cz / S);
       for (let r = 0; r < 18; r++) for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
@@ -13361,7 +13585,7 @@ class Objectives {
     const farFromOthers = (x, z) => others.every((g) => Math.hypot(g.x - x, g.z - z) > 6);
     const sp = this.level.spawn || [16, 16];
     if (type === 'note') return this.placeNote(cx, cz, rng, farFromOthers, sp, opts);
-    if (info.big) { const big = this.placeBig(type, cx, cz, from, opts); if (big) return big; if (type === 'slide') return null; type = 'door_stairs'; info = GOAL_INFO[type]; }
+    if (info.big) { const big = this.placeBig(type, cx, cz, from, opts); if (big) return big; type = 'door_stairs'; info = GOAL_INFO[type]; }
     if (info.wall) {
       const wide = type === 'door_shutter' || type === 'elevator';
       const slots = [];
@@ -13412,7 +13636,8 @@ class Objectives {
         if (!spaceFree(w, x, z, need, 0.05, 2.2)) continue;
         if (type === 'cabin' && !spaceFree(w, x, z + 1.8, 1.0)) continue;
         const face = Math.round(Math.atan2(from[0] - x, from[1] - z) / (Math.PI / 2)) * (Math.PI / 2);
-        return this.makeGoal(type, x, z, type === 'note' ? rng.range(0, TAU) : face, opts);
+        // a slide with no wall to sit in brings a stretch of wall with it
+        return this.makeGoal(type, x, z, type === 'note' ? rng.range(0, TAU) : face, type === 'slide' ? { ...opts, freestanding: true } : opts);
       }
     }
     return null;
@@ -13449,9 +13674,12 @@ class Objectives {
         const lz = k % 2 === 0 ? -3.9 : 3.9;
         this.world.addExtraFixture({ x: x + lz * sn, y: g.y + k * R + 1.15, z: z + lz * c, type: 'bulb', emit: 'omni', frame: false, color: [1.0, 0.95, 0.86], intensity: 1.5, flicker: FLICKER.STEADY, soft: 0.6, range: 8 });
       }
+    } else if (type === 'escalator') {
+      const R = opts.rise || 3.2, c = Math.cos(rot), sn = Math.sin(rot);
+      for (const [lz, ly] of [[-2.2, R + 2.7], [2.0, R * 0.55 + 2.6], [5.6, 2.6]]) this.world.addExtraFixture({ x: x + lz * sn, y: g.y + ly, z: z + lz * c, type: 'bulb', emit: 'omni', frame: false, color: [0.92, 0.96, 1.0], intensity: 1.6, flicker: FLICKER.STEADY, soft: 0.6, range: 9 });
     } else if (type === 'slide') {
       const c = Math.cos(rot), sn = Math.sin(rot);
-      this.world.addExtraFixture({ x: x + 1.2 * sn, y: g.y + 5.0, z: z + 1.2 * c, type: 'bulb', emit: 'omni', frame: false, color: [0.8, 0.95, 1.0], intensity: 1.5, flicker: FLICKER.STEADY, soft: 0.6, range: 10 });
+      this.world.addExtraFixture({ x: x + 1.4 * sn, y: g.y + 2.3, z: z + 1.4 * c, type: 'bulb', emit: 'omni', frame: false, color: [0.8, 0.95, 1.0], intensity: 0.9, flicker: FLICKER.STEADY, soft: 0.6, range: 7 });
     } else if (type.startsWith('door') || type === 'elevator' || type === 'hatch' || type === 'cabin') {
       const hex = parseInt(info.color.slice(1), 16);
       const col = [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
@@ -13627,7 +13855,7 @@ class Objectives {
     if (g.type === 'slide') {
       if (this.game.rideLock) return;
       g.play('ride');
-      this.game.ride(g, !!t.safe, st.def.rideTime || 9, () => { for (const x of st.targets) x.done = true; t.done = false; this.targetDone(t); });
+      this.game.ride(g, !!t.safe, st.def.rideTime || 9, () => { for (const x of st.targets) x.done = true; t.done = false; this.targetDone(t); }, t.ending || (t.safe ? 'door' : 'drop'));
       return;
     }
     switch (g.type) {
@@ -13637,7 +13865,7 @@ class Objectives {
         if (st.def.final) setTimeout(() => this.openElevator(g), 2600);
         else done();
         return;
-      case 'door_exit': case 'door_stairs': case 'door_security': case 'door_final': case 'stairs': case 'stairshaft':
+      case 'door_exit': case 'door_stairs': case 'door_security': case 'door_final': case 'stairs': case 'stairshaft': case 'escalator':
         g.state = 'done'; a.door('door'); g.play('open_door', done); return;
       case 'door_shutter': g.state = 'done'; a.door('shutter'); g.play('shutter', done); return;
       case 'hatch': g.state = 'done'; a.door('hatch'); g.play('hatch', done); return;
@@ -18996,7 +19224,16 @@ class Player {
   get inWater() { return this.game.level && !!this.game.level.wet; }
 
   update(dt) {
-    if (this.game.rideLock && this.game.rideRun) { this.game.rideRun.update(dt); return; }
+    if (this.game.rideLock && this.game.rideRun) {
+      // in a slide's tube you can still work your flashlight - it is the only light in there
+      if (input.hit('flashlight')) {
+        if (!this.flashlightOn && this.battery <= 1) this.game.hud.toast('The battery is dead.', 1000);
+        else { this.flashlightOn = !this.flashlightOn; this.audio.click(this.flashlightOn ? 1 : 0.8); }
+      }
+      if (this.flashlightOn) this.battery = Math.max(0, this.battery - dt * 0.42);
+      this.game.rideRun.update(dt);
+      return;
+    }
     if (settings.get('immortal')) this.holdVitals();
     const inp = input;
     // ------------------------------------------------------------- look
@@ -19507,11 +19744,11 @@ class Hud {
     clearTimeout(this._rt1); clearTimeout(this._rt2); clearTimeout(this._rt3);
     if (!on) { el.classList.remove('on'); return; }
     const t = el.querySelector('#ride-text');
-    t.textContent = 'You push off.';
+    t.textContent = 'You climb in. The plastic is warm.';
     el.classList.add('on');
-    this._rt1 = setTimeout(() => { t.textContent = 'It keeps going.'; }, secs * 1000 * 0.3);
-    this._rt2 = setTimeout(() => { t.textContent = 'Faster. The walls are gone.'; }, secs * 1000 * 0.58);
-    this._rt3 = setTimeout(() => { t.textContent = 'You can hear the bottom.'; }, secs * 1000 * 0.82);
+    this._rt1 = setTimeout(() => { t.textContent = 'The light from the mouth is gone.'; }, secs * 1000 * 0.3);
+    this._rt2 = setTimeout(() => { t.textContent = 'Faster. Only your flashlight now.'; }, secs * 1000 * 0.58);
+    this._rt3 = setTimeout(() => { t.textContent = 'Something is waiting at the bottom.'; }, secs * 1000 * 0.82);
   }
 
   rideFade(a) { const f = document.getElementById('ride-fade'); if (f) f.style.opacity = a; }
@@ -21816,12 +22053,59 @@ class Bus {
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 
 /**
- * A slide ride. Two parts: the real chute (you slide down the tower's own chute into its tunnel mouth), then the
- * tube: a long winding tube drawn around you high above the level, where nothing can get in the way. A safe slide
- * ends in a splash back at the foot of the tower; the others end in nothing, and you keep going.
+ * A slide ride. You climb into the mouth in the wall, and the tube takes you: a
+ * long winding tube of shiny coloured plastic, drawn around you high above the
+ * level where nothing can get in the way. Daylight from the mouth fades behind
+ * you within a few seconds; after that the only light in the tube is your own
+ * flashlight. Where it ends depends on the slide (see Objectives.setup):
+ *
+ *   safe  'door' | 'lobby' | 'hatch'   a way out: the stage is done
+ *   bad   'jaws' | 'grinder' | 'whirlpool' | 'drop'
  */
 const THREE = __mod['vendor/three/build/three.module.js'];
 const RIDE_Y = 80;
+const TUBE_VERT = /* glsl */`
+varying vec3 vW; varying vec3 vN; varying vec2 vUv;
+void main() {
+  vec4 w = modelMatrix * vec4(position, 1.0);
+  vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); vUv = uv;
+  gl_Position = projectionMatrix * viewMatrix * w;
+}`;
+// lit only by the flashlight (a cone from the camera) and the fading light from the mouth
+const TUBE_FRAG = /* glsl */`
+uniform vec3 uCam; uniform vec3 uDir; uniform float uFlash; uniform float uAmb; uniform float uS;
+uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC; uniform vec3 uColD;
+uniform float uStripes; uniform vec3 uTint; uniform vec3 uGlow; uniform float uShine;
+varying vec3 vW; varying vec3 vN; varying vec2 vUv;
+void main() {
+  vec3 toP = vW - uCam; float d = length(toP); vec3 L = toP / max(d, 1e-4);
+  vec3 N = normalize(vN); if (dot(N, L) > 0.0) N = -N;
+  float cone = smoothstep(0.78, 0.97, dot(L, uDir));
+  float att = 1.0 / (1.0 + 0.09 * d + 0.012 * d * d);
+  float lam = max(dot(N, -L), 0.0);
+  float flash = uFlash * (0.2 + 0.8 * cone) * att * (0.35 + 0.65 * lam) * 2.4;
+  float amb = uAmb / (1.0 + 0.05 * d);
+  vec3 base = uTint;
+  if (uStripes > 0.5) {
+    float band = fract(vUv.x * 3.0 + (uS + vUv.y * 3.0) / 7.0);
+    float k = floor(band * 4.0);
+    base = k < 0.5 ? uColA : (k < 1.5 ? uColB : (k < 2.5 ? uColC : uColD));
+  }
+  float light = flash + amb;
+  float spec = uShine * (pow(lam, 70.0) * uFlash * att * 3.5 + pow(lam, 9.0) * 0.18 * flash);
+  float sheen = uShine * smoothstep(0.03, 0.0, abs(fract(vUv.x * 2.0) - 0.25)) * light * 0.55;
+  gl_FragColor = vec4(base * (light + 0.01) + vec3(spec + sheen) + uGlow, 1.0);
+}`;
+const PLASTICS = [0xb3b9c4, 0xdb4034, 0x3d8ee0, 0xe8c22a, 0x3fc468, 0xe07c26];
+const ENDINGS = {
+  door: { safe: true, text: 'The tube spits you out in front of an exit door. You are alive.' },
+  lobby: { safe: true, text: 'You tumble out onto damp carpet, under humming lights. You are alive.' },
+  hatch: { safe: true, text: 'The tube ends under a hatch. You climb out into the air.' },
+  jaws: { text: 'The slide emptied into something\'s mouth.' },
+  grinder: { text: 'The slide ended in a grinder.' },
+  whirlpool: { text: 'The slide dropped you into a whirlpool. It did not let go.' },
+  drop: { text: 'The slide ended in a drop.' },
+};
 class Ride {
   constructor(game) {
     this.game = game;
@@ -21829,13 +22113,19 @@ class Ride {
     this.group.visible = false;
     game.scene.add(this.group);
     this.segs = []; this.rings = [];
-    const cyl = new THREE.CylinderGeometry(1.4, 1.4, 3.0, 16, 1, true), tor = new THREE.TorusGeometry(1.4, 0.07, 6, 24);
-    // the tube you ride down is moulded plastic in the slide's own colour: opaque, with
-    // a faint sheen on every other segment and on the rings between them (see goals.js)
-    this.mats = [0, 1].map(() => new THREE.MeshBasicMaterial({ color: 0x66ccff, side: THREE.DoubleSide, fog: false }));
-    this.ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+    const cyl = new THREE.CylinderGeometry(1.4, 1.4, 3.0, 20, 4, true), tor = new THREE.TorusGeometry(1.4, 0.07, 6, 24);
+    const U = this.U = {
+      uCam: { value: new THREE.Vector3() }, uDir: { value: new THREE.Vector3(0, 0, -1) },
+      uFlash: { value: 1 }, uAmb: { value: 1 },
+      uColA: { value: new THREE.Color() }, uColB: { value: new THREE.Color(0xe8c22a) }, uColC: { value: new THREE.Color(0x3d8ee0) }, uColD: { value: new THREE.Color(0x3fc468) },
+    };
+    this.mat = (o = {}) => new THREE.ShaderMaterial({
+      uniforms: { ...U, uS: { value: 0 }, uStripes: { value: o.stripes ? 1 : 0 }, uTint: { value: new THREE.Color(o.tint ?? 0xffffff) }, uGlow: { value: new THREE.Color(o.glow ?? 0x000000) }, uShine: { value: o.shine ?? 1 } },
+      vertexShader: TUBE_VERT, fragmentShader: TUBE_FRAG, side: THREE.DoubleSide, fog: false,
+    });
+    this.ringMat = this.mat({ tint: 0xdddddd, shine: 1.4 });
     for (let i = 0; i < 34; i++) {
-      const m = new THREE.Mesh(cyl, this.mats[i & 1]); m.frustumCulled = false; this.group.add(m); this.segs.push(m);
+      const m = new THREE.Mesh(cyl, this.mat({ stripes: true })); m.frustumCulled = false; this.group.add(m); this.segs.push(m);
       const r = new THREE.Mesh(tor, this.ringMat); r.frustumCulled = false; this.group.add(r); this.rings.push(r);
     }
     this.phase = null;
@@ -21843,23 +22133,27 @@ class Ride {
     this._up = new THREE.Vector3(0, 1, 0); this._fwd = new THREE.Vector3(0, 0, 1); this._t = new THREE.Vector3();
   }
 
-  start(goal, safe, secs, onSafe) {
+  start(goal, safe, secs, onSafe, ending) {
     this.goal = goal; this.safe = safe; this.onSafe = onSafe;
-    this.len = goal.opts.len || 8; this.H = 3.0;
+    this.ending = ENDINGS[ending] && !!ENDINGS[ending].safe === !!safe ? ending : (safe ? 'door' : 'drop');
     this.T = Math.max(5, secs);                       // seconds in the tube
-    this.tA = 1.0 + this.len * 0.14;                  // seconds on the chute
-    this.t = 0; this.phase = 'chute'; this.whoosh = 0;
-    // the six slide plastics, in the same order as SLIDE_PLASTIC in goals.js
-    const hex = [0xb3b9c4, 0xdb4034, 0x3d8ee0, 0xe8c22a, 0x3fc468, 0xe07c26][(goal.opts.hue || 0) % 6];
-    this.mats[0].color.setHex(hex); this.mats[1].color.setHex(hex).lerp(new THREE.Color(0xffffff), 0.18);
-    this.ringMat.color.setHex(hex).lerp(new THREE.Color(0xffffff), 0.42);
+    this.tA = 0.9;                                    // seconds climbing in
+    this.t = 0; this.phase = 'enter'; this.whoosh = 0; this.dark = false;
+    const hex = PLASTICS[(goal.opts.hue || 0) % 6];
+    // the slide's own colour leads; the other three stripes are the rest of the park's plastic
+    const others = PLASTICS.filter((h) => h !== hex && h !== 0xb3b9c4);
+    this.U.uColA.value.setHex(hex); this.U.uColB.value.setHex(others[0]); this.U.uColC.value.setHex(hex); this.U.uColD.value.setHex(others[(goal.opts.num || 1) % others.length]);
+    this.ringMat.uniforms.uTint.value.setHex(hex).lerp(new THREE.Color(0xffffff), 0.5);
     this.game.hud.ride(true, this.tA + this.T + 2);
     this.game.audio.door('hatch');
     goal.group.updateMatrixWorld(true);
+    const P = this.game.player;
+    this.from = { x: P.pos.x, y: P.pos.y, z: P.pos.z, yaw: P.yaw, pitch: P.pitch };
   }
 
   abort() {
     this.phase = null; this.group.visible = false;
+    this.clearEnd();
     this.game.hud.ride(false); this.game.hud.rideFade(0);
   }
 
@@ -21875,9 +22169,11 @@ class Ride {
     const a = Math.random() * 6, b = Math.random() * 6, k0 = 0.05 + Math.random() * 0.03;
     let px = x, py = RIDE_Y, pz = z, h = yaw;
     for (let s = 0; s <= L + 20; s += ds) {
-      const kap = k0 * (1 + 0.6 * Math.sin(s * 0.04 + a)) + 0.02 * Math.sin(s * 0.11 + b);
+      // the last stretch runs straight, so whatever waits at the end is seen coming
+      const calm = Math.max(0, Math.min(1, (L - 14 - s) / 10));
+      const kap = calm * (k0 * (1 + 0.6 * Math.sin(s * 0.04 + a)) + 0.02 * Math.sin(s * 0.11 + b));
       h += kap * ds;
-      const pitch = -0.07 - 0.1 * Math.sin(s * 0.07 + b), cp = Math.cos(pitch);
+      const pitch = -0.07 - 0.1 * Math.sin(s * 0.07 + b) * calm, cp = Math.cos(pitch);
       const tx = -Math.sin(h) * cp, tz = -Math.cos(h) * cp, ty = Math.sin(pitch);
       px += tx * ds; py += ty * ds; pz += tz * ds;
       pts.push({ x: px, y: py, z: pz, tx, ty, tz, h, pitch, kap });
@@ -21891,6 +22187,85 @@ class Ride {
     return { x: l(A.x, B.x), y: l(A.y, B.y), z: l(A.z, B.z), tx: l(A.tx, B.tx), ty: l(A.ty, B.ty), tz: l(A.tz, B.tz), h: l(A.h, B.h), pitch: l(A.pitch, B.pitch), kap: l(A.kap, B.kap) };
   }
 
+  /** Whatever waits where the tube ends, built at the end of the path, facing along it. */
+  buildEnd() {
+    this.clearEnd();
+    const e = this.ending, p = this.at(this.L), g = new THREE.Group(), parts = this.endParts = {};
+    g.position.set(p.x, p.y, p.z);
+    g.quaternion.setFromUnitVectors(this._fwd, this._t.set(p.tx, p.ty, p.tz).normalize());
+    const add = (geo, mat, o = {}) => { const m = new THREE.Mesh(geo, mat); m.position.set(o.x || 0, o.y || 0, o.z || 0); if (o.rx) m.rotation.x = o.rx; if (o.ry) m.rotation.y = o.ry; if (o.rz) m.rotation.z = o.rz; m.frustumCulled = false; g.add(m); return m; };
+    if (e === 'door' || e === 'lobby' || e === 'hatch') {
+      // a cap on the tube with a bright way out in it
+      add(new THREE.CircleGeometry(1.42, 28), this.mat({ tint: 0x222222 }), { z: 1.2 });
+      const glow = e === 'lobby' ? 0xffe39a : e === 'hatch' ? 0xdff2ff : 0xfffdf2;
+      if (e === 'hatch') add(new THREE.CircleGeometry(0.55, 24), this.mat({ tint: 0, glow, shine: 0 }), { z: 1.19 });
+      else add(new THREE.PlaneGeometry(e === 'lobby' ? 1.9 : 0.9, e === 'lobby' ? 1.3 : 1.9), this.mat({ tint: 0, glow, shine: 0 }), { z: 1.19, y: e === 'lobby' ? -0.2 : -0.3 });
+    } else if (e === 'jaws') {
+      // the tube ends in a mouth: rings of teeth, a wet red gullet, and a glow far down it
+      add(new THREE.CylinderGeometry(4.2, 2.2, 22, 24, 6, true), this.mat({ tint: 0x6a0a10, shine: 1.6 }), { z: 13, rx: Math.PI / 2 });
+      add(new THREE.CircleGeometry(2.3, 24), this.mat({ tint: 0, glow: 0x4a0204, shine: 0 }), { z: 23.5 });
+      parts.teeth = [];
+      for (const [z, n, r] of [[1.4, 16, 1.55], [3.4, 18, 2.4], [6.0, 20, 3.2]]) {
+        const ring = new THREE.Group(); ring.position.z = z; g.add(ring);
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2, tooth = new THREE.Mesh(new THREE.ConeGeometry(0.22 + (i % 3) * 0.06, 1.3 + (i % 2) * 0.6, 7), this.mat({ tint: 0xe8e2c8, shine: 1.2 }));
+          tooth.position.set(Math.cos(a) * r, Math.sin(a) * r, 0);
+          tooth.rotation.z = a + Math.PI / 2; tooth.frustumCulled = false;
+          ring.add(tooth);
+        }
+        parts.teeth.push({ ring, r });
+      }
+    } else if (e === 'grinder') {
+      // two drums of blades across the exit, turning against each other
+      add(new THREE.CircleGeometry(2.2, 24), this.mat({ tint: 0, glow: 0x2a0800, shine: 0 }), { z: 6 });
+      parts.drums = [];
+      for (const s of [-1, 1]) {
+        const drum = new THREE.Group(); drum.position.set(0, s * 0.62, 2.2); g.add(drum);
+        const core = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 3.4, 16), this.mat({ tint: 0x6a6d72, shine: 1.5 }));
+        core.rotation.z = Math.PI / 2; core.frustumCulled = false; drum.add(core);
+        for (let i = 0; i < 12; i++) for (let k = -3; k <= 3; k++) {
+          const a = (i / 12) * Math.PI * 2, blade = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.34, 0.12), this.mat({ tint: 0xb8bcc2, shine: 2 }));
+          blade.position.set(k * 0.45, Math.cos(a) * 0.55, Math.sin(a) * 0.55); blade.rotation.x = -a; blade.frustumCulled = false;
+          drum.add(blade);
+        }
+        parts.drums.push({ drum, s });
+      }
+      for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.2, 2.6, 0.6), this.mat({ tint: 0x2a2c30 }), { x: s * 1.75, z: 2.2 });
+    } else if (e === 'whirlpool') {
+      // the tube ends in the air, over a black sea turning round a hole
+      const tex = canvasTexR(256, 256, (c, w, h) => {
+        c.fillStyle = '#02080c'; c.fillRect(0, 0, w, h);
+        c.strokeStyle = 'rgba(140,200,220,0.55)'; c.lineWidth = 3;
+        for (let arm = 0; arm < 5; arm++) { c.beginPath(); for (let i = 0; i < 90; i++) { const a = arm * 1.2566 + i * 0.09, r = 4 + i * 1.4; c.lineTo(w / 2 + Math.cos(a) * r, h / 2 + Math.sin(a) * r); } c.stroke(); }
+        const gr = c.createRadialGradient(w / 2, h / 2, 2, w / 2, h / 2, 30); gr.addColorStop(0, '#000'); gr.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
+      });
+      const water = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshBasicMaterial({ map: tex, color: 0x6b8c96, fog: false }));
+      water.frustumCulled = false; this.group.add(water);
+      water.position.set(p.x + p.tx * 14, p.y - 22, p.z + p.tz * 14); water.rotation.x = -Math.PI / 2;
+      parts.water = water;
+    }
+    this.group.add(g);
+    this.endGroup = g;
+  }
+
+  clearEnd() {
+    const dispose = (o) => o.traverse((m) => { if (m.isMesh) { m.geometry.dispose(); if (m.material !== this.ringMat && !this.segs.some((s) => s.material === m.material)) { if (m.material.map) m.material.map.dispose(); m.material.dispose(); } } });
+    if (this.endGroup) { this.group.remove(this.endGroup); dispose(this.endGroup); this.endGroup = null; }
+    if (this.endParts && this.endParts.water) { this.group.remove(this.endParts.water); dispose(this.endParts.water); }
+    this.endParts = null;
+  }
+
+  /** The tube's light: your flashlight, and the mouth's daylight fading behind you. */
+  light(s) {
+    const pl = this.game.player, cam = this.game.engine.camera;
+    this.U.uCam.value.copy(cam.position);
+    cam.getWorldDirection(this.U.uDir.value);
+    const on = pl.flashlightOn && pl.battery > 1;
+    this.U.uFlash.value = on ? Math.min(1, 0.35 + pl.battery / 60) : 0;
+    this.U.uAmb.value = 0.9 * Math.pow(Math.max(0, 1 - s / 30), 2);
+    if (!on && s > 30 && !this.dark) { this.dark = true; this.game.hud.toast('Pitch black. Your flashlight is the only light in here.', 2600); }
+  }
+
   update(dt) {
     const g = this.game, pl = g.player, hud = g.hud;
     input.consumeMouse();
@@ -21899,57 +22274,90 @@ class Ride {
     this.whoosh -= dt;
     if (this.whoosh <= 0) { this.whoosh = 0.22; g.audio.burst(2200 + Math.random() * 900, 0.6, 0.3, this.phase === 'tube' ? 0.12 : 0.06, 'bandpass'); }
     const goal = this.goal, rot = goal.rot;
-    if (this.phase === 'chute') {
-      const u = Math.min(1, this.t / this.tA), e = u * u * (0.5 + 0.5 * u);
-      const z = 0.9 - e * (this.len + 0.9);
-      const y = z > 0.4 ? this.H : this.H - (0.4 - z) * (this.H - 0.55) / this.len;
-      this._v.set(0, y, z); goal.group.localToWorld(this._v);
-      this.aim(pl, this._v.x, this._v.y, this._v.z, rot, z > 0.4 ? -0.05 : -Math.atan2(this.H - 0.55, this.len) - 0.05);
+    if (this.phase === 'enter') {
+      // duck and climb into the mouth
+      const u = Math.min(1, this.t / this.tA), e = u * u * (3 - 2 * u);
+      this._v.set(0, 0.2 - 0.05 * e, 1.3 - 1.25 * e); goal.group.localToWorld(this._v);
+      this.aim(pl, this._v.x, this._v.y, this._v.z, rot, -0.05 * e);
+      hud.rideFade(Math.max(0, (u - 0.65) / 0.35));
       if (u >= 1) { this.phase = 'dark'; this.t = 0; }
     } else if (this.phase === 'dark') {
-      hud.rideFade(Math.min(1, this.t / 0.3));
-      if (this.t >= 0.4) {
-        this._v.set(0, 0, -this.len - 0.8); goal.group.localToWorld(this._v);
+      hud.rideFade(1);
+      if (this.t >= 0.35) {
+        this._v.set(0, 0, -1.0); goal.group.localToWorld(this._v);
         this.buildPath(this._v.x, this._v.z, rot);
+        this.buildEnd();
         this.group.visible = true; this.phase = 'tube'; this.t = 0;
       }
     } else if (this.phase === 'tube') {
       hud.rideFade(Math.max(0, 1 - this.t / 0.5));
       const T = this.T, k = Math.min(1, this.t / T);
-      const s = 6 * this.t + 17 * T * (k * k * k - 0.5 * k * k * k * k);
-      const p = this.at(Math.min(s, this.L));
+      const s = Math.min(this.L, 6 * this.t + 17 * T * (k * k * k - 0.5 * k * k * k * k));
+      const p = this.at(s);
       this.aim(pl, p.x, p.y - 0.65, p.z, p.h, p.pitch, -p.kap * 6);
-      this.layTube(Math.min(s, this.L));
+      this.layTube(s);
+      this.light(s);
+      this.animEnd(dt, this.L - s);
       g.player.addTrauma(0.05 + k * 0.1);
       if (this.t >= T) {
-        this.endV = 23; this.endP = p; this.phase = this.safe ? 'splash' : 'fall'; this.t = 0;
-        this.fy = p.y - 0.65;
+        this.endV = 23; this.endP = p; this.t = 0;
+        this.phase = this.safe ? 'out' : (this.ending === 'jaws' || this.ending === 'grinder' ? 'crush' : 'fall');
       }
-    } else if (this.phase === 'splash') {
-      hud.rideFade(Math.min(1, this.t / 0.3));
+    } else if (this.phase === 'out') {
+      // into the light
+      this.light(this.L); hud.rideFade(Math.min(1, this.t / 0.3));
       if (this.t >= 0.4) {
-        this.group.visible = false;
-        this._v.set(0, 0, 5.6); goal.group.localToWorld(this._v);
-        pl.pos.set(this._v.x, 0, this._v.z); pl.vel.set(0, 0, 0); pl.yaw = rot; pl.pitch = 0;
-        hud.rideFade(0); hud.whiteout(true); hud.toast('SPLASH. You are alive.', 2400);
+        this.group.visible = false; this.clearEnd();
+        this._v.set(0, 0, 1.6); goal.group.localToWorld(this._v);
+        pl.pos.set(this._v.x, g.world.groundAt(this._v.x, this._v.z), this._v.z); pl.vel.set(0, 0, 0); pl.yaw = rot; pl.pitch = 0;
+        hud.rideFade(0); hud.whiteout(true); hud.toast(ENDINGS[this.ending].text, 2800);
         setTimeout(() => hud.whiteout(false), 900);
         const cb = this.onSafe;
         this.phase = null; g.rideLock = false; hud.ride(false);
         cb();
       }
+    } else if (this.phase === 'crush') {
+      // carried on into the teeth / the blades
+      const p = this.endP, d = Math.min(3.2, this.t * 9);
+      this.aim(pl, p.x + p.tx * d, p.y - 0.65 + p.ty * d, p.z + p.tz * d, p.h, p.pitch, Math.sin(this.t * 40) * 0.05);
+      this.light(this.L); this.animEnd(dt, -d);
+      g.player.addTrauma(0.6);
+      if (this.t > 0.25) hud.damage(1);
+      hud.rideFade(Math.max(0, (this.t - 0.45) / 0.3));
+      if (this.t >= 0.8) this.kill();
     } else if (this.phase === 'fall') {
-      // out of the end of the tube, and nothing there
-      const p = this.endP, v = this.endV, t = this.t;
+      // out of the end of the tube, and nothing there - or a sea turning round a hole
+      const p = this.endP, v = this.endV, t = this.t, swirl = this.ending === 'whirlpool';
       this.fy = p.y - 0.65 - 0.5 * 9.8 * t * t + p.ty * v * t;
-      this.aim(pl, p.x + p.tx * v * t, this.fy, p.z + p.tz * v * t, p.h, Math.max(-1.35, p.pitch - t * 0.9), 0);
-      hud.rideFade(Math.max(0, (t - 0.9) / 0.6));
-      if (t >= 1.6) {
-        this.group.visible = false; hud.rideFade(0);
-        this.phase = null; g.rideLock = false; hud.ride(false);
-        pl.health = 0; pl.dead = true;
-        g.die(null, 'The slide ended in a drop.');
-      }
+      const yaw = p.h + (swirl ? t * t * 2.2 : 0);
+      this.aim(pl, p.x + p.tx * v * Math.min(t, 0.7), Math.max(this.fy, p.y - 21.5), p.z + p.tz * v * Math.min(t, 0.7), yaw, Math.max(-1.35, p.pitch - t * 0.9), swirl ? Math.sin(t * 3) * 0.3 : 0);
+      this.light(this.L); this.animEnd(dt, 0);
+      hud.rideFade(Math.max(0, (t - (swirl ? 1.6 : 0.9)) / 0.6));
+      if (t >= (swirl ? 2.3 : 1.6)) this.kill();
     }
+  }
+
+  animEnd(dt, ahead) {
+    const P = this.endParts;
+    if (!P) return;
+    if (P.teeth) for (const [i, T] of P.teeth.entries()) {
+      // the mouth closes as you come
+      const close = Math.max(0, Math.min(1, 1 - (ahead - i * 2) / 10));
+      const k = 1 - 0.55 * close * close;
+      for (const tooth of T.ring.children) { tooth.position.setLength(T.r * k); }
+      T.ring.rotation.z += dt * (i % 2 ? 0.3 : -0.3) * close;
+    }
+    if (P.drums) for (const D of P.drums) D.drum.rotation.x += dt * 9 * D.s;
+    if (P.water) P.water.rotation.z += dt * 0.9;
+  }
+
+  kill() {
+    const g = this.game, pl = g.player, hud = g.hud;
+    this.group.visible = false; hud.rideFade(0); this.clearEnd();
+    this.phase = null; g.rideLock = false; hud.ride(false);
+    // the body is found at the slide's mouth: that is where a respawn picks you up again
+    pl.health = 0; pl.dead = true;
+    g.die(null, ENDINGS[this.ending].text);
   }
 
   /** Lay the pooled tube pieces along the path around the rider's position s. */
@@ -21961,11 +22369,19 @@ class Ride {
       const p = this.at(sj);
       this._t.set(p.tx, p.ty, p.tz).normalize();
       m.visible = true; m.position.set(p.x, p.y, p.z); m.quaternion.copy(this._q.setFromUnitVectors(this._up, this._t));
-      m.material = this.mats[(j0 + i) & 1];
+      m.material.uniforms.uS.value = j0 + i;
       const q = this.at(sj - 1.5);
       r.visible = true; r.position.set(q.x, q.y, q.z); r.quaternion.copy(this._q.setFromUnitVectors(this._fwd, this._t));
     }
   }
+}
+
+/** A small canvas texture (the ride's whirlpool). */
+function canvasTexR(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d'); if (g) draw(g, w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 class Game {
@@ -22191,12 +22607,12 @@ class Game {
     }
   }
 
-  /** Waterslides: hand the player to the Ride (real chute, long tube, then the splash or the drop). */
-  ride(goal, safe, secs, onSafe) {
+  /** Slides: hand the player to the Ride (into the mouth, the long dark tube, then whatever is at the end). */
+  ride(goal, safe, secs, onSafe, ending) {
     if (this.rideLock || this.state !== 'play') return;
     this.rideLock = true;
     this.hud.prompt(null);
-    (this.rideRun || (this.rideRun = new Ride(this))).start(goal, safe, secs, onSafe);
+    (this.rideRun || (this.rideRun = new Ride(this))).start(goal, safe, secs, onSafe, ending);
   }
 
   abortRide() {

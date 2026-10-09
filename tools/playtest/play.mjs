@@ -10,12 +10,13 @@
 //   node tools/playtest/play.mjs all             all 135 (slow: ~20 s each)
 //
 // Puzzle stages that need a code, a colour order or a lucky guess (keypads,
-// ordered valves, "pick the safe slide", "pick the right window") cannot be
-// solved by a script: they are reported as "did not finish", which is expected.
+// ordered valves, "pick the right window") cannot be solved by a script: they
+// are reported as "did not finish", which is expected. A row of slides is
+// ridden for real: the script takes the safe one (it can read the answer).
 // ============================================================================
 import { bootGame } from './boot.mjs';
 
-const PUZZLE = /code|in order|Pick a slide|Pick the|window that leads/i;
+const PUZZLE = /code|in order|Pick the|window that leads/i;
 
 const b = bootGame();
 if (!b.game) {
@@ -57,10 +58,15 @@ for (const lv of list) {
       const st = obj.stage;
       if (!st) break;
       const idx = obj.index;
-      const targets = st.targets.filter((t) => !t.done && t.goal);
+      // a row of slides is a puzzle for the player, but the script can read the answer
+      const targets = st.targets.filter((t) => !t.done && t.goal && (!st.def.pickSafe || t.safe));
       if (targets.length) {
         for (const t of targets) {
-          pl.pos.set(t.x + 1.0, game.world.groundAt(t.x + 1.0, t.z), t.z);
+          // stand in front of it: wall goals face +z in their own frame
+          const g = t.goal, wall = g.info && g.info.wall;
+          const sx = wall ? g.x + Math.sin(g.rot) * 1.3 : t.x + 1.0, sz = wall ? g.z + Math.cos(g.rot) * 1.3 : t.z;
+          pl.pos.set(sx, g.y || game.world.groundAt(sx, sz), sz);
+          pl.yaw = Math.atan2(sx - g.x, sz - g.z);
           pl.vel.set(0, 0, 0);
           await clock.settle(6);
           let tries = 0, used = false;
