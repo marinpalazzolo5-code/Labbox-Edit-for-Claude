@@ -10,7 +10,9 @@
 //     straight into that level;
 //   * walking on the ceiling (gen.params.ceilingWalk, cor01): the rubble by the
 //     spawn climbs through the hole, the top of the ceiling holds the player, and
-//     the roof hatch up there is a shortcut out of the level.
+//     the roof hatch up there is a shortcut out of the level;
+//   * a painted map (gen.params.layout, from the level studio) makes the walls it
+//     shows, and placed creatures stand where they were put.
 //
 //   node tools/playtest/stages.mjs
 // ============================================================================
@@ -111,6 +113,34 @@ if (cw) {
     if (hatch) { hatch.use(); for (let i = 0; i < 200 && !game.objectives.finished; i++) await clock.settle(1); }
     check(game.objectives.finished, 'cor01: the roof hatch is a way out of the level');
   }
+}
+
+// ---- a painted map and placed creatures
+{
+  const L = globalThis.__mod['src/levels/index.js'];
+  const base = LEVELS.find((l) => l.id === 'level0');
+  const rows = [];
+  for (let z = 0; z < 16; z++) {
+    let r = '';
+    for (let x = 0; x < 16; x++) r += (x === 4 && z >= 2 && z <= 12) ? '#' : (z === 7 ? '.' : (x >= 6 && x <= 10 && z >= 6 && z <= 10 ? '.' : '?'));
+    rows.push(r);
+  }
+  const lv = { ...base, id: 'layout-test', gen: L.compileGen({ type: 'lobby', params: { ...(base.gen().params), layout: rows } }, 'layout-test'),
+    placed: [['smiler', 17, 17]], entities: [], rare: [] };
+  LEVELS.push(lv);
+  await enter('layout-test');
+  const w = game.world;
+  let walls = 0, wrong = 0;
+  for (let z = 2; z <= 12; z++) {
+    // the solid column x = 4: walls on its west and east faces (x lines 4 and 5)
+    if (w.getEdgeV(4, z) === 1 && w.getEdgeV(5, z) === 1) walls++; else wrong++;
+  }
+  check(wrong === 0, `a painted wall column is walled in on both sides (${walls} cells right, ${wrong} wrong)`);
+  let open = 0;
+  for (let x = 6; x < 10; x++) if (w.getEdgeV(x + 1, 8) !== 1) open++;
+  check(open === 4, `painted open floor is open (${open}/4 edges open)`);
+  const sm = game.entities.list.find((e) => e.type === 'smiler');
+  check(sm && Math.hypot(sm.pos.x - 17, sm.pos.z - 17) < 0.01, `the placed smiler stands where it was put (${sm ? sm.pos.x.toFixed(1) + ', ' + sm.pos.z.toFixed(1) : 'missing'})`);
 }
 
 const real = problems.filter((p) => !/GPU stall/.test(p.msg));

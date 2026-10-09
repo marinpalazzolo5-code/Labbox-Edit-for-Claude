@@ -3,7 +3,9 @@
   "description",
   "gen.params.cuts",
   "fall",
-  "corrupt"
+  "corrupt",
+  "intro",
+  "gen.params.ceilingWalk"
  ],
  "cor02": [
   "description",
@@ -30,7 +32,9 @@
   "corrupt"
  ],
  "cor06": [
-  "corrupt"
+  "corrupt",
+  "intro",
+  "gen.params.ceilingWalk"
  ],
  "cor07": [
   "description",
@@ -105,7 +109,9 @@
   "corrupt"
  ],
  "cor23": [
-  "corrupt"
+  "corrupt",
+  "intro",
+  "gen.params.ceilingWalk"
  ],
  "cor24": [
   "corrupt"
@@ -145,7 +151,8 @@
  ],
  "pg02": [
   "intro",
-  "stages"
+  "stages",
+  "gen.params.props"
  ],
  "pg05": [
   "description",
@@ -154,16 +161,23 @@
   "gen.params.density",
   "gen.params.roomChance",
   "gen.params.doorwayChance",
-  "stages"
+  "stages",
+  "gen",
+  "follower",
+  "entities",
+  "rare"
  ],
  "pg10": [
   "description",
   "intro",
-  "stages"
+  "stages",
+  "spawn",
+  "gen"
  ],
  "pg15": [
   "intro",
-  "stages"
+  "stages",
+  "gen.params.props"
  ],
  "pg16": [
   "description",
@@ -172,15 +186,20 @@
   "gen.params.roomChance",
   "gen.params.doorwayChance",
   "stages",
-  "entities"
+  "entities",
+  "gen",
+  "follower",
+  "rare"
  ],
  "pg21": [
   "intro",
-  "stages"
+  "stages",
+  "gen.params.props"
  ],
  "pg25": [
   "intro",
-  "stages"
+  "stages",
+  "gen.params.props"
  ],
  "pg27": [
   "description",
@@ -188,10 +207,95 @@
   "gen.params.density",
   "gen.params.roomChance",
   "stages",
-  "entities"
+  "entities",
+  "gen",
+  "follower",
+  "rare"
  ],
  "_packs": [
   "PACKS[2].blurb",
   "PACKS[3].blurb"
+ ],
+ "level20": [
+  "description",
+  "intro",
+  "spawn",
+  "ambientLight",
+  "fog",
+  "gen",
+  "stages"
+ ],
+ "pg23": [
+  "description",
+  "intro",
+  "spawn",
+  "gen",
+  "stages"
+ ],
+ "pg01": [
+  "gen.params.props"
+ ],
+ "pg03": [
+  "gen.params.props"
+ ],
+ "pg04": [
+  "gen.params.props"
+ ],
+ "pg06": [
+  "gen.params.props"
+ ],
+ "pg07": [
+  "gen.params.props"
+ ],
+ "pg08": [
+  "gen.params.props"
+ ],
+ "pg09": [
+  "gen.params.props"
+ ],
+ "pg11": [
+  "gen.params.props"
+ ],
+ "pg12": [
+  "gen.params.props"
+ ],
+ "pg13": [
+  "gen.params.props"
+ ],
+ "pg14": [
+  "gen.params.props"
+ ],
+ "pg17": [
+  "gen.params.props"
+ ],
+ "pg18": [
+  "gen.params.props"
+ ],
+ "pg19": [
+  "gen.params.props"
+ ],
+ "pg20": [
+  "gen.params.props"
+ ],
+ "pg22": [
+  "gen.params.treeChance",
+  "gen.params.leaves",
+  "gen.params.floorMat",
+  "gen.params.props"
+ ],
+ "pg24": [
+  "gen.params.props"
+ ],
+ "pg26": [
+  "gen.params.props"
+ ],
+ "pg28": [
+  "gen.params.props"
+ ],
+ "pg29": [
+  "gen.params.props"
+ ],
+ "pg30": [
+  "gen.params.props"
  ]
 }
