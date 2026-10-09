@@ -148,6 +148,9 @@ const { RNG } = M['src/core/rng.js'];
 const { setLight } = M['src/entities/rig.js'];
 const { buildModel } = M['src/entities/models.js'];
 const ED = M['src/entities/registry.js'].ENTITY_DEFS;
+// where each creature's file lives (entities/<pack>/<id>.js), from entities/loader.js
+const LE = window.LabEntities || { files: {}, packOf: {} };
+const fileOf = (id) => 'entities/' + (LE.files[id] || (id + '.js'));
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -279,7 +282,7 @@ function show(id, opts = {}) {
   } catch (e) {
     console.error(e);
     const box = $('err');
-    box.textContent = 'Could not build “' + id + '”\n\n' + (e && e.stack ? e.stack : e) + '\n\nFile: entities/' + id + '.js';
+    box.textContent = 'Could not build “' + id + '”\n\n' + (e && e.stack ? e.stack : e) + '\n\nFile: ' + fileOf(id);
     box.style.display = 'block';
     current = null;
     updateList(id); updateInfo(id, null);
@@ -391,7 +394,7 @@ function reportRuntime(e) {
   runtimeReported = true;
   console.error(e);
   const box = $('err');
-  box.textContent = 'animate() threw in “' + (current ? current.id : '?') + '”\n\n' + (e && e.stack ? e.stack : e) + '\n\nFile: entities/' + (current ? current.id : '') + '.js';
+  box.textContent = 'animate() threw in “' + (current ? current.id : '?') + '”\n\n' + (e && e.stack ? e.stack : e) + '\n\nFile: ' + fileOf(current ? current.id : '');
   box.style.display = 'block';
   setTimeout(() => { box.style.display = 'none'; }, 7000);
 }
@@ -442,7 +445,7 @@ function filterList() {
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function updateInfo(id, model) {
   const d = ED[id];
-  $('fileline').innerHTML = '<code>entities/' + esc(id) + '.js</code>';
+  $('fileline').innerHTML = '<code>' + esc(fileOf(id)) + '</code>' + (LE.packOf[id] && LE.packOf[id] !== 'base' ? ' · ' + esc(LE.packOf[id]) + ' pack only' : '');
   const flags = ['rare', 'fly', 'noclip', 'burrow', 'statue', 'static', 'passive', 'darkOnly', 'xray', 'phobia'].filter((f) => d[f]);
   const walk = d.speed > 0 ? d.speed.toFixed(2) + ' m/s' : '— (stationary)';
   const run = d.chase > 0 ? d.chase.toFixed(2) + ' m/s' : '— (never chases)';
