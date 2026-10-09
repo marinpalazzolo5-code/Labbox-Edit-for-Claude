@@ -1,9 +1,10 @@
 // --------------------------------------------------------------------------
 // Ω-10 - The Escalator Atrium  (id: pg10, Playground)
-// Six storeys of mall atrium whose escalators all stop at the wrong floor. The only way up is the stairwell in the service core: one narrow shaft, six flights.
+// Six storeys of mall round one atrium, and every escalator still runs - up. The service stairs on the sixth floor are the way on, into the mirror maze.
 //
-// Scene: 20 generator settings, 2 entity groups, 1 rare spawns, loot keys 10/water 5/batteries 3
-//    1. Take the stairwell to the sixth floor  [stairshaft - 6 flights, rise 3 (final)]
+// Scene: a six-storey mall round an atrium with running escalators, 2 entity groups, 1 rare spawn
+//    1. Wind the music box  [musicbox, floor 2]
+//    2. The service stairs  [door_stairs (final), floor 5, carries on into pg11]
 //
 // One level per file: change anything here and reload the game. Field list:
 // levels/README.md  -  build levels without code: other/level-studio.html
@@ -15,9 +16,9 @@ LabLevels.add('playground', {
   place: 'Going up',
   cls: 'Class 3',
   seed: 9470,
-  description: 'Six storeys of mall atrium whose escalators all stop at the wrong floor. The only way up is the stairwell in the service core: one narrow shaft, six flights.',
-  intro: 'The escalators are stopping at the wrong floors. Take the stairwell: one shaft, six flights to the top of the atrium.',
-  spawn: [16, 16],
+  description: 'Six storeys of mall round one atrium, and every escalator still runs - up. The service stairs on the sixth floor are the way on, into the mirror maze.',
+  intro: 'Ride the escalators up through the atrium. Wind the music box on the third floor, then find the service stairs on the sixth. They lead straight down into the next ride.',
+  spawn: [16.5, 30],
   hum: 0.01,
   ambientLight: [0.1, 0.09, 0.1],
   bounce: 0.4,
@@ -25,38 +26,29 @@ LabLevels.add('playground', {
   fog: { color: 0xf2dce8, density: 0.016 },
   tuning: { grimeScale: 0.1, wetScale: 0.3 },
   gen: {
-    type: 'lobby',
+    type: 'open',
+    mode: 'mall',
     params: {
-      height: 5.4,
-      wallMat: 'stucco',
-      floorMat: 'terrazzo',
-      ceilMat: 'ceiling_white',
-      fixtureMat: 'fixture_troffer',
-      frameMat: 'metal_white',
-      fixtureColor: [1, 0.96, 0.88],
-      fixtureIntensity: 3.8,
-      density: [0.06, 0.2],
-      roomChance: 0.45,
-      doorwayChance: 0.18,
-      deadChance: 0.02,
-      flickerChance: 0.02,
-      strobeChance: 0,
-      dyingChance: 0,
-      darkZones: 0.03,
-      missingTileChance: 0.004,
-      featureWeights: { pool: 0.4, glass: 0.8, collapse: 0, exit: 0.6, blackout: 0 },
-      props: 'escalator',
-      pillarChance: 0.7,
+      floors: 6,
+      fountain: true,
     },
   },
   stages: [
     {
-      text: 'Take the stairwell to the sixth floor',
-      goal: 'stairshaft',
-      flights: 6,
-      rise: 3,
-      dist: [30, 48],
+      text: 'Ride the escalators to the third floor and switch the music back on',
+      hint: 'Every escalator still runs. They only go up.',
+      goal: 'musicbox',
+      floor: 2,
+      dist: [10, 30],
+    },
+    {
+      text: 'Keep going up: the service stairs are on the sixth floor',
+      goal: 'door_stairs',
+      floor: 5,
+      dist: [10, 40],
+      from: 'prev',
       final: true,
+      next: 'pg11',
     },
   ],
   entities: [['mannequin', 3], ['partygoer', 1]],

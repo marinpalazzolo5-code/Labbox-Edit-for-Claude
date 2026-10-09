@@ -58,7 +58,8 @@ for (const id of list) {
       input.keys = input.keys || {};
       for (let i = 0; i < 60; i++) { pl.pos.x += 0.03; await clock.settle(1); }
       let top = pl.pos.y;
-      for (let i = 0; i < 60 * 20 && pl.pos.y < y1 - 0.05; i++) { await clock.settle(1); top = Math.max(top, pl.pos.y); }
+      // an escalator carries you; a block of flats has plain stairs, which you walk up
+      for (let i = 0; i < 60 * 20 && pl.pos.y < y1 - 0.05; i++) { if (!B.mall && pl.pos.x < c.top0 + 0.4) pl.pos.x += 0.04; await clock.settle(1); top = Math.max(top, pl.pos.y); }
       // step off sideways onto the gallery
       const dz = c.north ? -1 : 1;
       const offX = (c.top0 + c.top1) / 2;
@@ -66,7 +67,7 @@ for (const id of list) {
       for (let i = 0; i < 60; i++) { pl.pos.z += dz * 0.04; await clock.settle(1); }
       const onGallery = Math.abs(pl.pos.y - y1) < 0.25 && (c.north ? pl.pos.z < B.A0 : pl.pos.z > B.A1);
       const ok = top > y1 - 0.15 && onGallery;
-      console.log(`${ok ? 'ok  ' : 'FAIL'} ${id} floor ${c.f} -> ${c.f + 1}: rode up to ${top.toFixed(2)} m of ${y1.toFixed(2)} m, stepped off at y=${pl.pos.y.toFixed(2)} z=${pl.pos.z.toFixed(2)}`);
+      console.log(`${ok ? 'ok  ' : 'FAIL'} ${id} floor ${c.f} -> ${c.f + 1}: ${B.mall ? 'rode' : 'walked'} up to ${top.toFixed(2)} m of ${y1.toFixed(2)} m, stepped off at y=${pl.pos.y.toFixed(2)} z=${pl.pos.z.toFixed(2)}`);
       if (!ok) bad++;
     }
     for (const g of game.objectives.goals) {

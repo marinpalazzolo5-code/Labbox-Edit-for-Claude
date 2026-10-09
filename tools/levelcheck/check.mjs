@@ -79,7 +79,8 @@ const SETS = {
 };
 const STAGE_KEYS = new Set(['text', 'goal', 'item', 'count', 'dist', 'final', 'from', 'reuse', 'effects',
   'survive', 'rideTime', 'pickSafe', 'order', 'code', 'corridor', 'hint', 'clue', 'clueDist', 'clueTitle',
-  'choose', 'chooseClue', 'revert', 'angle', 'start', 'flights', 'rise', 'floor', 'checkpoint', 'endings', 'next']);
+  'choose', 'chooseClue', 'revert', 'angle', 'start', 'flights', 'rise', 'floor', 'checkpoint', 'endings', 'next',
+  'atSpawn', 'exits', 'slideLen'].concat(GAME.stageKeys || []));
 const MAT_KEYS = ['wallMat', 'floorMat', 'ceilMat', 'fixtureMat', 'frameMat', 'waterMat'];
 const OPEN_MODES = new Set(GAME.presets.map((p) => p.gen.mode).filter(Boolean).concat(GAME.openModes || [])
   .concat(['suburbs', 'city', 'field', 'cave', 'hills', 'courtyard', 'heights', 'lot', 'ocean', 'mall', 'apartment', 'stairwell']));
@@ -262,6 +263,14 @@ for (const pack of packs) {
         if (e.length > 2 && (typeof e[2] !== 'object' || Array.isArray(e[2]))) problems.push(where + ': the third value of an entities entry (' + e[0] + ') is an options object');
         if (e.length > 3) warnings.push(where + ': ' + what + ' entry for ' + e[0] + ' has more values than [id, n, options]');
         if (what === 'rare' && e[1] > 1) warnings.push(where + ': rare chance for ' + e[0] + ' is above 1');
+      }
+    }
+    if (def.follower !== undefined) {
+      const fo = def.follower;
+      if (!fo || typeof fo !== 'object' || Array.isArray(fo)) problems.push(where + ': follower must look like { type: \'chase\', delay: 8 }');
+      else {
+        useEntity(fo.type || 'chase', 'follower');
+        if (fo.delay !== undefined && !(typeof fo.delay === 'number' && fo.delay > 0)) problems.push(where + ': follower.delay is seconds behind the player (a number > 0)');
       }
     }
     if (def.placed !== undefined) {

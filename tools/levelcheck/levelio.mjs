@@ -6,7 +6,7 @@ export const COLOR_KEYS = new Set(['color', 'top', 'horizon', 'glow']);
 export const ORDER = ['id', 'name', 'subtitle', 'place', 'cls', 'passive', 'seed', 'description', 'intro',
   'spawn', 'wet', 'wade', 'outdoor', 'fall', 'dark', 'adrenaline', 'puzzle', 'cover', 'leviathan',
   'ambience', 'hum', 'flashes', 'fogBanks', 'dayNight', 'envLamps', 'surface', 'ambientLight', 'bounce',
-  'lightRange', 'fog', 'sky', 'tuning', 'current', 'phobia', 'corrupt', 'gen', 'stages', 'entities', 'rare', 'loot'];
+  'lightRange', 'fog', 'sky', 'tuning', 'current', 'phobia', 'corrupt', 'gen', 'stages', 'follower', 'entities', 'rare', 'placed', 'loot'];
 
 export const PACK_META = {
   base: { label: 'Base campaign', prefix: null },

@@ -1,9 +1,9 @@
 // --------------------------------------------------------------------------
 // Ω-16 - The Great Staircase  (id: pg16, Playground)
-// One great stairwell in candy-cane stripes: twelve flights in a single narrow shaft, turning back on itself all the way to the top. There is nothing else in the tower.
+// One great stairwell in candy-cane stripes: twelve flights in a single narrow shaft, and a door on the sixth landing for anyone who cannot face the rest.
 //
-// Scene: 19 generator settings, 4 entity groups, 1 rare spawns, loot keys 10/water 5/batteries 3
-//    1. Climb the great stairwell to the top  [stairshaft - 12 flights, rise 2.8 (final)]
+// Scene: the level is one stairwell (12 flights, exits on landings 6), with a follower on the stairs
+//    1. Climb the stairwell  [stairshaft at the spawn (final)]
 //
 // One level per file: change anything here and reload the game. Field list:
 // levels/README.md  -  build levels without code: other/level-studio.html
@@ -15,8 +15,8 @@ LabLevels.add('playground', {
   place: 'Twelve flights',
   cls: 'Class 4',
   seed: 9752,
-  description: 'One great stairwell in candy-cane stripes: twelve flights in a single narrow shaft, turning back on itself all the way to the top. There is nothing else in the tower.',
-  intro: 'One narrow shaft, twelve flights, and things that join you partway up. Do not stop to count the floors.',
+  description: 'One great stairwell in candy-cane stripes: twelve flights in a single narrow shaft, and a door on the sixth landing for anyone who cannot face the rest.',
+  intro: 'Twelve flights, or six and the door on floor 7. The mascot is climbing too, a few seconds behind you. Do not stop to count the floors.',
   spawn: [16, 16],
   hum: 0.01,
   ambientLight: [0.1, 0.09, 0.1],
@@ -24,41 +24,22 @@ LabLevels.add('playground', {
   lightRange: 20,
   fog: { color: 0xf2dce8, density: 0.016 },
   tuning: { grimeScale: 0.1, wetScale: 0.3 },
-  gen: {
-    type: 'lobby',
-    params: {
-      height: 2.7,
-      wallMat: 'metal_red',
-      floorMat: 'rubber_floor',
-      ceilMat: 'ceiling_white',
-      fixtureMat: 'fixture_troffer',
-      frameMat: 'metal_white',
-      fixtureColor: [1, 0.9, 0.8],
-      fixtureIntensity: 3.8,
-      density: [0.32, 0.6],
-      roomChance: 0.18,
-      doorwayChance: 0.16,
-      deadChance: 0.02,
-      flickerChance: 0.02,
-      strobeChance: 0,
-      dyingChance: 0,
-      darkZones: 0.03,
-      missingTileChance: 0.004,
-      featureWeights: { pool: 0.4, glass: 0.8, collapse: 0, exit: 0.6, blackout: 0 },
-      props: 'barestair',
-    },
-  },
+  gen: { type: 'open', mode: 'stairwell', params: {} },
   stages: [
     {
-      text: 'Climb the great stairwell to the top',
+      text: 'Climb the stairwell',
+      hint: 'Keep moving: it gains on you while you stand still',
       goal: 'stairshaft',
       flights: 12,
       rise: 2.8,
-      dist: [30, 46],
+      exits: [6],
+      atSpawn: true,
+      dist: [0, 0],
       final: true,
     },
   ],
-  entities: [['partygoer', 2], ['pg_attendant', 2], ['hound', 1], ['pg_mascot', 1]],
-  rare: [['pg_mascot', 0.3]],
+  follower: { type: 'pg_mascot', delay: 8 },
+  entities: [],
+  rare: [],
   loot: { keys: 10, water: 5, batteries: 3 },
 });

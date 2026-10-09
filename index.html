@@ -8344,11 +8344,51 @@ class EntityManager {
     for (const [type, chance] of this.level.rare || []) {
       if (this.rng.next() < chance) this.spawn(type, fromSpawn ? sp : null, 30, 60);
     }
+    // creatures the level's author put in a fixed place (the studio's map: placed: [[id, x, z], ...])
+    for (const [type, x, z] of this.level.placed || []) if (ENTITY_DEFS[type]) this.make(type, x, z);
+    // something that follows the player's own footsteps (follower: { type, delay })
+    const fo = this.level.follower;
+    if (fo && ENTITY_DEFS[fo.type || 'chase']) {
+      const e = this.make(fo.type || 'chase', sp[0], sp[1]);
+      e.follow = { delay: fo.delay || 8, lag: fo.delay || 8, dmg: fo.damage ?? 20, hitT: 0 };
+      e.dist = 99;
+      e.root.visible = false;
+      this.trail = [];
+    }
+  }
+
+  /**
+   * A follower walks exactly where the player walked, a few seconds behind: up every
+   * flight of a stairwell, round every landing. Keep moving and it stays behind; stand
+   * still and it closes the gap. Nothing about it is clever, which is the point.
+   */
+  updateFollower(e, dt) {
+    const F = e.follow, pl = this.player, trail = this.trail || (this.trail = []);
+    const moving = Math.hypot(pl.vel.x, pl.vel.z) > 0.8 || Math.abs(pl.vel.y) > 0.5 || this.game.rideLock;
+    F.lag = Math.max(0.9, Math.min(F.delay, F.lag + (moving ? 0.2 : -0.55) * dt));
+    const at = this.time - F.lag;
+    let p = null;
+    for (let i = trail.length - 1; i >= 0; i--) if (trail[i].t <= at) { p = trail[i]; break; }
+    if (!p) { e.root.visible = false; return; }
+    const dx = p.x - e.pos.x, dz = p.z - e.pos.z, step = Math.hypot(dx, dz);
+    if (step > 0.01) e.yaw = Math.atan2(dx, dz);
+    e.pos.set(p.x, 0, p.z); e.fy = p.y;
+    e.root.visible = true;
+    e.root.position.set(p.x, p.y, p.z);
+    e.root.rotation.y = e.yaw;
+    e.st.speed = Math.min(6, step / Math.max(dt, 1e-3));
+    e.model.animate(e.st, dt);
+    const d = Math.hypot(pl.pos.x - p.x, pl.pos.z - p.z, (pl.pos.y - p.y) * 1.5);
+    e.dist = d;
+    F.hitT -= dt;
+    if (d < 1.1 && F.hitT <= 0 && !this.game.rideLock) { F.hitT = 1.2; pl.damage(F.dmg, e); this.game.hud.flash('It caught up with you.', 1200); }
+    if (!F.warned && d < 6) { F.warned = true; this.game.hud.toast('Something is on the stairs behind you.', 2200); }
   }
 
   clear() {
     for (const e of this.list) this.dispose(e);
     this.list = [];
+    this.trail = null;
     this.pendingChase = 0;
     this.fx.clear();
     this.fogBoost = this.desat = this.whisper = this.rumble = this.aberr = 0;
@@ -8395,6 +8435,25 @@ class EntityManager {
     return e;
   }
 
+  /**
+   * Which floor an entity is on, in a multi-storey building. It walks the ground
+   * plan (the walls are the same on every floor); where there is no floor under it
+   * (the atrium) it drops to the floor below, and when it has been out of sight on
+   * another floor for a while it turns up on the player's - it took the stairs.
+   * Returns how many floors lie between it and the player.
+   */
+  floorOf(e, floors, pf, dt) {
+    if (e.floor === undefined) e.floor = pf;
+    if (!floors.slab(e.pos.x, e.pos.z, e.floor)) e.floor = floors.dropTo(e.pos.x, e.pos.z, e.floor);
+    if (e.floor !== pf) {
+      e.floorT = (e.floorT || 0) + dt;
+      const pl = this.player;
+      if (e.floorT > 7 && floors.slab(e.pos.x, e.pos.z, pf) && !this.world.visible(pl.pos.x, pl.eyeY, pl.pos.z, e.pos.x, floors.y(pf) + 1.4, e.pos.z)) { e.floor = pf; e.floorT = 0; }
+    } else e.floorT = 0;
+    e.fy = floors.y(e.floor);
+    return Math.abs(e.floor - pf);
+  }
+
   spawn(type, near = null, dmin = 16, dmax = 30, extra = false) {
     const def = ENTITY_DEFS[type];
     if (def.static) return this.spawnStatic(type, near, dmin, dmax);
@@ -8402,7 +8461,9 @@ class EntityManager {
     const P = this.player.pos;
     const cx = near ? near[0] : P.x, cz = near ? near[1] : P.z;
     const eye = this.player.eyeY;
+    const bounds = this.world.gen && this.world.gen.bounds;
     const spot = this.nav.randomSpot(cx, cz, dmin, dmax, this.rng, (x, z) => {
+      if (bounds && (x < bounds[0] || z < bounds[1] || x > bounds[2] || z > bounds[3])) return false;
       if (Math.hypot(x - P.x, z - P.z) < 12) return false;
       if (this.world.visible(P.x, eye, P.z, x, 1.4, z) && Math.hypot(x - P.x, z - P.z) < 30) return false;
       if (def.darkOnly && this.lum(x, z) > DARK_LUM) return false;
@@ -8537,10 +8598,20 @@ class EntityManager {
     const cosFov = Math.cos(THREE.MathUtils.degToRad(cam.fov * 0.62 * Math.max(1, cam.aspect)));
     const S = this.diff.speed;
     const ceil = this.ceiling();
+    // a multi-storey level: everything lives on a floor, and only what shares the
+    // player's floor is close to them (see floorOf)
+    const floors = this.world.gen && this.world.gen.floors, pf = floors ? floors.floorOf(P.y) : 0;
+    if (this.trail) {
+      const tr = this.trail, last = tr[tr.length - 1];
+      if (!last || this.time - last.t > 0.05) tr.push({ t: this.time, x: P.x, y: P.y, z: P.z });
+      while (tr.length && this.time - tr[0].t > 40) tr.shift();
+    }
     for (const e of this.list) {
       const def = e.def;
+      if (e.follow) { this.updateFollower(e, dt); threat = Math.max(threat, Math.max(0, 1 - e.dist / 12)); continue; }
       const dx = P.x - e.pos.x, dz = P.z - e.pos.z;
-      const d = Math.hypot(dx, dz);
+      let d = Math.hypot(dx, dz);
+      if (floors) d += this.floorOf(e, floors, pf, dt) * 30;
       e.dist = d;
 
       // ---- hidden (Smilers waiting for darkness, Whisperers repositioning)
@@ -8661,7 +8732,7 @@ class EntityManager {
       e.root.visible = show;
       if (e.model.worldSpace) { e.root.position.set(0, 0, 0); e.root.rotation.y = 0; }
       else {
-        const fl = def.fly ? 0 : this.world.groundAt(e.pos.x, e.pos.z);
+        const fl = (def.fly ? 0 : this.world.groundAt(e.pos.x, e.pos.z)) + (e.fy || 0);
         e.root.position.set(e.pos.x, e.pos.y + fl, e.pos.z);
         e.root.rotation.y = e.yaw;
       }
@@ -8732,7 +8803,7 @@ class EntityManager {
     const len = Math.hypot(ex, ey, ez) || 1;
     const dot = (ex * camFwd.x + ey * camFwd.y + ez * camFwd.z) / len;
     if (dot < cosFov - 0.05) return 0;
-    if (!this.world.visible(pl.pos.x, pl.eyeY, pl.pos.z, e.pos.x, 1.3, e.pos.z)) return 0;
+    if (!this.world.visible(pl.pos.x, pl.eyeY, pl.pos.z, e.pos.x, (e.fy || 0) + 1.3, e.pos.z)) return 0;
     return dot;
   }
 
@@ -8775,7 +8846,7 @@ class EntityManager {
     let sees = false;
     if (d < R) {
       const facing = Math.cos(Math.atan2(P.x - e.pos.x, P.z - e.pos.z) - e.yaw) > -0.2 || d < R * 0.45 || e.state === 'chase';
-      if (facing && (def.xray || this.world.visible(e.pos.x, Math.min(e.model.eyeY, 2.4), e.pos.z, P.x, pl.eyeY, P.z))) sees = true;
+      if (facing && (def.xray || this.world.visible(e.pos.x, (e.fy || 0) + Math.min(e.model.eyeY, 2.4), e.pos.z, P.x, pl.eyeY, P.z))) sees = true;
       if (d < R * 0.4) sees = true; // heard
     }
     if (def.think) { def.think(this, e, d, sees, noise); return; }
@@ -8784,7 +8855,7 @@ class EntityManager {
     if (def.puppet) {
       if (!this.game.night) { e.state = 'wander'; e.path = null; e.idle = 1; return; }
       const moving = (pl.walkSpeed || 0) > 0.35;
-      const seesP = moving && d < def.detect * this.diff.detect && this.world.visible(e.pos.x, e.model.eyeY, e.pos.z, P.x, pl.eyeY, P.z);
+      const seesP = moving && d < def.detect * this.diff.detect && this.world.visible(e.pos.x, (e.fy || 0) + e.model.eyeY, e.pos.z, P.x, pl.eyeY, P.z);
       if (seesP || (moving && d < 3)) { if (e.state !== 'chase') this.alert(e); e.lost = 0; e.lastSeen = [P.x, P.z]; }
       else if (e.state === 'chase') { e.lost += 0.2; if (e.lost > (moving ? def.memory : 1.2)) { e.state = 'wander'; e.path = null; } }
       if (e.state === 'chase') this.route(e, P.x, P.z);
@@ -8978,7 +9049,7 @@ class EntityManager {
       e.attackT += dt;
       if (prev < 0.36 && e.attackT >= 0.36 && !(e.observed && def.statue)) {
         const pl = this.player;
-        const los = def.xray || def.duller || this.world.visible(e.pos.x, 1.2, e.pos.z, pl.pos.x, pl.eyeY - 0.3, pl.pos.z);
+        const los = def.xray || def.duller || this.world.visible(e.pos.x, (e.fy || 0) + 1.2, e.pos.z, pl.pos.x, pl.eyeY - 0.3, pl.pos.z);
         if (d < def.reach + 0.55 && los) {
           pl.damage(def.dmg * (e.dmgMul || 1), e);
           this.game.audio.entity(e.type, 'hit', e.pos, pl);
@@ -13224,6 +13295,12 @@ class Goal {
     for (const [a, b] of [[-half - wt, -doorW], [doorW, half + wt]]) this.collider(a, lintel, zOuter, b, roof, zOuter + wt);
     this.collider(-doorW, lintel, zOuter, doorW, yTop, zOuter + wt);
     this.collider(-doorW, yTop + 2.17, zOuter, doorW, roof, zOuter + wt);
+    if (this.opts.sealed) {
+      // a stairwell level starts inside the shaft: there is no way out at the bottom
+      this.box(wall, -half - wt, 0, zOuter, half + wt, lintel, zOuter + wt);
+      this.collider(-half - wt, 0, zOuter, half + wt, lintel, zOuter + wt);
+      this.glowSign('B1', glow, 0.4, 0.16, 2.0, zOuter - 0.01).rotation.y = Math.PI;
+    }
 
     // the flights: even ones climb down the left lane, odd ones back up the right
     for (let k = 0; k < F; k++) {
@@ -13257,12 +13334,38 @@ class Goal {
     this.box('chrome', 0.15, 1.0, 0.025, doorW * 2 - 0.12, 1.05, 0.06, P.leaf);
     const sign = this.glowSign('STAIRS', glow, 0.55, 0.2, yTop + 2.32, zOuter + 0.13);
     sign.rotation.y = Math.PI;
+    // doors off the stairwell on some landings: a floor to get off at (stage key exits)
+    this.exits = [];
+    this.foci = [];
+    for (const k of this.opts.exits || []) {
+      const j = Math.max(1, Math.min(F - 1, k | 0)) - 1;      // landing at the top of flight j
+      const atBack = j % 2 === 0, ly = (j + 1) * R, zf = atBack ? -zOuter + 0.01 : zOuter - 0.01, s = atBack ? 1 : -1;
+      const door = this.pivot(0, ly, zf);
+      if (!atBack) door.rotation.y = Math.PI;
+      this.box('metal_dark', -doorW - 0.06, 0, 0, -doorW, 2.25, 0.08, door);
+      this.box('metal_dark', doorW, 0, 0, doorW + 0.06, 2.25, 0.08, door);
+      this.box('metal_dark', -doorW - 0.06, 2.17, 0, doorW + 0.06, 2.25, 0.08, door);
+      const portal = this.add(xf(new THREE.PlaneGeometry(doorW * 2, 2.17), { y: 1.085, z: 0.005 }), glowMat('#fffdf2', { fog: false }), door);
+      portal.visible = false;
+      const leaf = this.pivot(-doorW + 0.02, 0, 0.04, door);
+      this.box('metal_grey', 0, 0.005, -0.02, doorW * 2 - 0.04, 2.16, 0.02, leaf);
+      this.box('chrome', 0.15, 1.0, 0.02, doorW * 2 - 0.12, 1.05, 0.05, leaf);
+      const fs = this.add(new THREE.PlaneGeometry(0.6, 0.18), glowMat('#ffffff', { map: signTex('FLOOR ' + (j + 2), glow) }), door);
+      fs.position.set(0, 2.42, 0.03);
+      this.exits.push({ leaf, portal, y: ly, floor: j + 2, z: zf + s * 0.35, local: new THREE.Vector3(0, ly + 1.1, zf + s * 0.35) });
+    }
     // the roof of the shaft: the climb is enclosed all the way to the top door
     this.box('concrete', -half - wt, roof, -zOuter - wt, half + wt, roof + 0.3, zOuter + wt);
     this.collider(-half - wt, roof, -zOuter - wt, half + wt, roof + 0.3, zOuter + wt);
     this.collider(-doorW, yTop, zOuter, doorW, yTop + 2.2, zOuter + 0.1);
   }
 
+
+  /** Where to stand to use landing door i of a stairwell (world space). */
+  exitFocus(i) {
+    this.group.updateMatrixWorld(true);
+    return this.group.localToWorld(new THREE.Vector3().copy(this.exits[i].local));
+  }
 
   get focus() {
     const t = this.type;
@@ -13335,6 +13438,7 @@ class Goal {
     const k = a.kind;
     let fireAt = 0.6;
     if (k === 'open_door') { P.leaf.rotation.y = -1.7 * smooth(e(1.0)); P.portal.visible = true; fireAt = 0.9; }
+    else if (k === 'open_exit') { const X = this.exits[this.exitIdx]; X.leaf.rotation.y = -1.7 * smooth(e(1.0)); X.portal.visible = true; fireAt = 0.9; }
     else if (k === 'call') { P.led.material.color.set('#ffb030'); fireAt = 0.2; }
     else if (k === 'elev_open') { P.l.position.x = -0.78 * smooth(e(1.4)); P.r.position.x = 0.78 * smooth(e(1.4)); P.portal.visible = true; fireAt = 1.3; }
     else if (k === 'shutter') { P.leaf.position.y = 2.3 * smooth(e(1.6)); P.leaf.scale.y = 1 - 0.9 * smooth(e(1.6)); P.portal.visible = true; fireAt = 1.4; }
@@ -13404,6 +13508,8 @@ const { Goal: Goal, GOAL_INFO: GOAL_INFO, SLIDE_MARKS: SLIDE_MARKS } = __mod['sr
 // feeds the HUD compass and rolls back timed stages when the player dies.
 
 const TAU = Math.PI * 2;
+/** Goals that take you somewhere: using one is a checkpoint, and at the end of a level it can carry you on (stage key next). */
+const TRANSPORTS = new Set(['elevator', 'stairs', 'stairshaft', 'escalator', 'slide', 'door_stairs', 'hatch']);
 
 class Objectives {
   constructor(game) {
@@ -13430,6 +13536,7 @@ class Objectives {
   setup(level) {
     this.clear();
     this.level = level;
+    this.spawnYaw = undefined;
     const rng = new RNG(hash32(level.seed, 0x0b1e));
     const sp = level.spawn || [16, 16];
     const base = rng.next() * TAU;
@@ -13472,7 +13579,7 @@ class Objectives {
       }
       if (def.goal === 'escalator') for (let k = 0; k < count; k++) extra.push({ rise: def.rise || 3.2, hue: i });
       if (def.goal === 'stairs') for (let k = 0; k < count; k++) extra.push({ rise: def.rise || 3, hue: i });
-      if (def.goal === 'stairshaft') for (let k = 0; k < count; k++) extra.push({ rise: def.rise || 2.8, flights: def.flights || 6, hue: i });
+      if (def.goal === 'stairshaft') for (let k = 0; k < count; k++) extra.push({ rise: def.rise || 2.8, flights: def.flights || 6, hue: i, exits: def.exits || [] });
       if (def.choose) {
         const others = ['pool', 'red', 'forest', 'void'].filter((v) => v !== def.choose);
         rng.shuffle(others);
@@ -13631,8 +13738,9 @@ class Objectives {
   /** A stairwell level: the shaft stands round the spawn, so the level starts at the foot of the stairs. */
   placeAtSpawn(type, sp, opts = {}) {
     if (type !== 'stairshaft') return null;
-    // the bottom landing of the shaft is at local (0, +3.2): put the spawn there
-    return this.makeGoal(type, sp[0], sp[1] - 3.2, 0, { ...opts, sealed: true });
+    // the bottom landing of the shaft is at local (0, +3.25): put the spawn there, facing the first flight
+    this.spawnYaw = 0;
+    return this.makeGoal(type, sp[0], sp[1] - 3.25, 0, { ...opts, sealed: true });
   }
 
   place(type, cx, cz, from, rng, opts = {}) {
@@ -13778,6 +13886,12 @@ class Objectives {
   targetDone(t) {
     if (t.done) return;
     t.done = true;
+    // elevators, stairs, escalators and slides are checkpoints: die after one and you start again there
+    const st0 = this.stage;
+    if (t.goal && TRANSPORTS.has(t.goal.type) && st0 && st0.targets.includes(t) && !st0.def.final && st0.def.checkpoint !== false) {
+      const pl = this.game.player;
+      this.game.setCheckpoint(pl.pos.x, pl.pos.y, pl.pos.z, pl.yaw, 'Checkpoint');
+    }
     if (this.game.phobia) this.game.phobia.onGoal(t);
     this.game.bus.emit('goal', t);
     const st = this.stage;
@@ -13794,7 +13908,7 @@ class Objectives {
     const st = this.stage;
     st.done = true;
     if (st.def.effects) this.run(st.def.effects);
-    if (st.def.final) { this.finished = true; this.game.levelComplete(); return; }
+    if (st.def.final) { this.finished = true; this.game.levelComplete(st.def.next || null); return; }
     this.index++;
     this.beginStage();
     const next = this.stage;
@@ -13850,6 +13964,14 @@ class Objectives {
         if (this.stage && this.stage.def.survive) {
           out.push({ x: f.x, y: f.y, z: f.z, text: 'The elevator is on its way…', use: () => this.game.audio.locked() });
           continue;
+        }
+        // a stairwell's landing doors: any of them is a way out
+        if (g.exits && g.exits.length && si === this.index) {
+          for (let i = 0; i < g.exits.length; i++) {
+            const p = g.exitFocus(i);
+            if (Math.abs(p.y - this.game.player.pos.y - 1.1) > 1.6) continue;
+            out.push({ x: p.x, y: p.y, z: p.z, text: `Leave the stairwell at floor ${g.exits[i].floor}`, use: () => { g.pendingExit = i; this.use(t); } });
+          }
         }
         let text = g.info.prompt;
         if (g.type === 'elevator') {
@@ -13923,7 +14045,10 @@ class Objectives {
         if (st.def.final) setTimeout(() => this.openElevator(g), 2600);
         else done();
         return;
-      case 'door_exit': case 'door_stairs': case 'door_security': case 'door_final': case 'stairs': case 'stairshaft': case 'escalator':
+      case 'stairshaft':
+        g.exitIdx = g.pendingExit ?? -1; g.pendingExit = undefined;
+        g.state = 'done'; a.door('door'); g.play(g.exitIdx >= 0 ? 'open_exit' : 'open_door', done); return;
+      case 'door_exit': case 'door_stairs': case 'door_security': case 'door_final': case 'stairs': case 'escalator':
         g.state = 'done'; a.door('door'); g.play('open_door', done); return;
       case 'door_shutter': g.state = 'done'; a.door('shutter'); g.play('shutter', done); return;
       case 'hatch': g.state = 'done'; a.door('hatch'); g.play('hatch', done); return;
@@ -13989,10 +14114,8 @@ class Objectives {
   onDeath() {
     const st = this.stage;
     if (!st || this.finished) return;
-    if (st.def.pickSafe && st.targets.length) {
-      const right = Math.floor(Math.random() * st.targets.length);
-      st.targets.forEach((t, k) => { t.safe = k === right; t.done = false; });
-    }
+    // a row of slides keeps its answer: the paint and the clue note still point the same way
+    if (st.def.pickSafe && st.targets.length) st.targets.forEach((t) => { t.done = false; });
     if (st.def.revert && this.index > 0) {
       for (const t of st.targets) { t.done = false; if (t.goal && !st.def.reuse) t.goal.resetVisual(); }
       this.index--;
@@ -17596,8 +17719,6 @@ function bldPlan(world, P) {
       const ends = [u.a0];
       if ((u.side === 'w' || u.side === 'e') && Math.abs(u.a1 - (W - S1)) < 0.01) ends.push(u.a1);
       for (const a of ends) if (a > 0.31 && a < W - 0.31) ubox(u, st.wall, a - T / 2, a + T / 2, y0, y1, 0, D, BSOLID, { seg: 2 });
-      // the inner face of the outer walls and the partitions, in the unit's colour
-      ubox(u, un.wall, u.a0 + T / 2, u.a1 - T / 2, y0, y1, D - 0.01, D, 0, { seg: 2, faces: u.n[0] === 0 ? (u.n[1] > 0 ? 16 : 32) : (u.n[0] > 0 ? 1 : 2) });
       // corner shops: the part of the front that faces another strip is plain wall
       if (u.g0 > u.a0 + 0.01) ubox(u, un.wall, u.a0, u.g0, y0, y1, 0, T, BSOLID, { seg: 2 });
       if (u.g1 < u.a1 - 0.01) ubox(u, un.wall, u.g1, u.a1, y0, y1, 0, T, BSOLID, { seg: 2 });
@@ -23077,8 +23198,10 @@ class Game {
     this.world.renderRadius = fullRadius;
 
     this.player.reset(sp.x, sp.z, this.world.groundAt(sp.x, sp.z));
+    if (this.objectives.spawnYaw !== undefined) this.player.yaw = this.objectives.spawnYaw;
     this.player.revive();
     this.player.water = 1;
+    this.checkpoint = null; this.onBelt = false;
     this.dust.setDensity(settings.get('particles') | 0);
     this.audio.setLevel(level);
     this.lights.onFlickerEvent = (fx, kind) => this.audio.flicker(fx, kind, this.player.pos);
@@ -23174,14 +23297,45 @@ class Game {
     this.audio.staticOn();
   }
 
+  /** A respawn point part-way through a level (transports, escalators, stairwell landings). */
+  setCheckpoint(x, y, z, yaw, label) {
+    const c = this.checkpoint;
+    if (c && Math.hypot(c.x - x, c.z - z) < 2 && Math.abs(c.y - y) < 1) return;
+    this.checkpoint = { x, y, z, yaw };
+    if (label) this.hud.toast(label, 1600);
+    if (this.bus) this.bus.emit('checkpoint', this.checkpoint);
+  }
+
+  /** Escalators and stairwell landings set checkpoints as you pass them. */
+  watchCheckpoints() {
+    const pl = this.player;
+    const belt = !!(pl.onGround && pl.standOn && pl.standOn.carry && pl.standOn.carry.belt);
+    if (belt && !this.onBelt) this.beltFromY = pl.pos.y;
+    if (!belt && this.onBelt && pl.onGround && pl.pos.y > (this.beltFromY ?? 0) + 1.5) {
+      const fl = this.world.gen && this.world.gen.floors;
+      this.setCheckpoint(pl.pos.x, pl.pos.y, pl.pos.z, pl.yaw, fl ? `Checkpoint: floor ${fl.floorOf(pl.pos.y) + 1}` : 'Checkpoint');
+    }
+    this.onBelt = belt;
+    for (const g of this.objectives.goals) {
+      if (g.type !== 'stairshaft' || Math.hypot(pl.pos.x - g.x, pl.pos.z - g.z) > 6) continue;
+      const R = Math.max(2.2, g.opts.rise || 2.8), k = Math.floor((pl.pos.y - g.y + 0.1) / R);
+      const exit = (g.exits || []).find((e) => Math.abs(e.y - (pl.pos.y - g.y)) < 0.15);
+      if (pl.onGround && k > 0 && (exit || k % 4 === 0) && (g.cpLanding || 0) < k) {
+        g.cpLanding = k;
+        this.setCheckpoint(pl.pos.x, pl.pos.y, pl.pos.z, pl.yaw, exit ? `Checkpoint: floor ${exit.floor}` : `Checkpoint: landing ${k}`);
+      }
+    }
+  }
+
   respawn() {
-    const sp = this.spawnPoint;
+    const sp = this.spawnPoint, cp = this.checkpoint;
     this.director.reset();
     this.objectives.onDeath();
-    this.player.reset(sp.x, sp.z, 0);
+    if (cp) { this.player.reset(cp.x, cp.z, cp.y); this.player.yaw = cp.yaw; }
+    else this.player.reset(sp.x, sp.z, 0);
     this.player.revive();
     this.player.water = Math.max(this.player.water, 1);
-    this.world.update(0, sp.x, sp.z);
+    this.world.update(0, cp ? cp.x : sp.x, cp ? cp.z : sp.z);
     this.entities.redistribute();
     this.phobia.onRespawn();
     this.audio.staticOff();
@@ -23201,11 +23355,22 @@ class Game {
     }
   }
 
-  levelComplete() {
+  levelComplete(next = null) {
     if (this.state !== 'play') return;
     this.state = 'complete';
     const level = this.level;
     save.completeLevel(level.id, this.levelTime, this.deaths);
+    // a transport that goes on: the elevator / stairs / slide carries you straight into the next level
+    const to = next && LEVELS.find((l) => l.id === next);
+    if (to) {
+      this.bus.emit('levelComplete', { level, time: this.levelTime, deaths: this.deaths });
+      this.audio.complete();
+      this.hud.whiteout(true);
+      this.hud.setTimer(null);
+      this.hud.toast(`${level.name} complete. It carries you on to ${to.name} - ${to.subtitle}.`, 2600);
+      setTimeout(() => { if (this.state === 'complete' && this.level === level) this.enter(to.id); }, 1600);
+      return;
+    }
     const bounty = 2 * save.tier('bounty');
     if (bounty) save.addBank(bounty);
     this.bus.emit('levelComplete', { level, time: this.levelTime, deaths: this.deaths });
@@ -23284,6 +23449,7 @@ class Game {
       this.focusT -= dt;
       if (this.focusT <= 0) { this.focusT = 0.08; this.updateFocus(); }
       this.player.update(dt);
+      if (this.state === 'play') this.watchCheckpoints();
     }
     if (this.state === 'dead') {
       input.consumeMouse();
