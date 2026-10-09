@@ -11119,12 +11119,15 @@ const PROPS = {
         bx(b, 'glass', sm, s > 0 ? 0.68 : -0.73, 0.12, -L / 2, s > 0 ? 0.73 : -0.68, 1.0, L / 2, 63 & ~8);
         bx(b, 'rubber_black', sm, s > 0 ? 0.65 : -0.76, 1.0, -L / 2, s > 0 ? 0.76 : -0.65, 1.07, L / 2);
         // the balustrade carries on flat over each landing and turns down into the newel
+        // (opts.landings === false: an escalator you step off sideways, onto a gallery)
+        if (o.landings !== false) {
         bx(b, 'glass', m, s > 0 ? 0.68 : -0.73, 0.06, z0 - 0.2, s > 0 ? 0.73 : -0.68, 1.0, zs, 63 & ~8);
         bx(b, 'rubber_black', m, s > 0 ? 0.65 : -0.76, 1.0, z0 - 0.2, s > 0 ? 0.76 : -0.65, 1.07, zs);
         cyl(b, 'rubber_black', m, s * 0.705, 0.55, z0 - 0.2, 0.06, 0.52, 10);
         bx(b, 'glass', m, s > 0 ? 0.68 : -0.73, 0.1 + rise, zt, s > 0 ? 0.73 : -0.68, 1.06 + rise, zt + 0.8, 63 & ~8);
         bx(b, 'rubber_black', m, s > 0 ? 0.65 : -0.76, 1.06 + rise, zt, s > 0 ? 0.76 : -0.65, 1.13 + rise, zt + 0.8);
         cyl(b, 'rubber_black', m, s * 0.705, 0.6 + rise, zt + 0.8, 0.06, 0.53, 10);
+        }
         bx(b, side, m, s > 0 ? 0.64 : -0.78, 0, z0 - 0.2, s > 0 ? 0.78 : -0.64, 0.12, zs);
         bx(b, 'fixture_green', m, s > 0 ? 0.6 : -0.62, 0.07, z0 - 0.18, s > 0 ? 0.62 : -0.6, 0.11, z0 - 0.05, 63, { uv: 'unit' });
       }
@@ -11567,23 +11570,34 @@ function worldAABB(c, x, y, z, rot, scale = 1) {
   return [minX, y + c[1] * scale, minZ, maxX, y + c[4] * scale, maxZ];
 }
 
+/**
+ * A prop's colliders in world space: [{ a: [minX, minY, minZ, maxX, maxY, maxZ], carry }].
+ * carry is what the collider does to whoever stands on it (see Player.carry).
+ */
+function propColliders(type, x, y, z, rot, opts = {}, scale = 1) {
+  const def = PROPS[type], out = [];
+  const cols = def && (def.collidersFor ? def.collidersFor(opts) : def.colliders);
+  if (!cols || cols === 'self') return out;
+  for (const c of cols) {
+    let carry = null;
+    if (c[6] === 'spin' && !opts.still) carry = { spin: def.spin || 0.4, x, z };
+    else if (c[6] === 'belt') carry = { belt: (opts.speed ?? 0.7) * (opts.down ? -1 : 1), dx: Math.sin(rot), dz: Math.cos(rot) };
+    out.push({ a: worldAABB(c, x, y, z, rot, scale), carry });
+  }
+  return out;
+}
+
 /** Register a prop in a layout: adds colliders now, geometry at build time. */
 function addProp(l, type, x, y, z, rot, opts = {}, seed = 0) {
   const def = PROPS[type];
   if (!def) return null;
   const p = { type, x, y, z, rot, opts, seed, scale: opts.scale || 1 };
   l.props.push(p);
-  const cols = def.collidersFor ? def.collidersFor(opts) : def.colliders;
-  if (cols && cols !== 'self') {
-    for (const c of cols) {
-      const a = worldAABB(c, x, y, z, rot, p.scale);
-      const col = makeCollider(a[0], a[1], a[2], a[3], a[4], a[5], opts.flags ?? (C.SOLID | C.PLATFORM | (opts.occlude ? C.OCCLUDE : 0)));
-      col.owner = p;
-      // what this collider does to whoever stands on it (see Player.carry)
-      if (c[6] === 'spin' && !opts.still) col.carry = { spin: def.spin || 0.4, x, z };
-      else if (c[6] === 'belt') col.carry = { belt: (opts.speed ?? 0.7) * (opts.down ? -1 : 1), dx: Math.sin(rot), dz: Math.cos(rot) };
-      l.colliders.add(col);
-    }
+  for (const { a, carry } of propColliders(type, x, y, z, rot, opts, p.scale)) {
+    const col = makeCollider(a[0], a[1], a[2], a[3], a[4], a[5], opts.flags ?? (C.SOLID | C.PLATFORM | (opts.occlude ? C.OCCLUDE : 0)));
+    col.owner = p;
+    if (carry) col.carry = carry;
+    l.colliders.add(col);
   }
   if (def.light && l.fixtures && !opts.dark) {
     const L = def.light;
@@ -12112,6 +12126,7 @@ __e['propMatrix'] = propMatrix;
 __e['addProp'] = addProp;
 __e['buildProps'] = buildProps;
 __e['addMover'] = addMover;
+__e['propColliders'] = propColliders;
 __e['spaceFree'] = spaceFree;
 __e['wallSlots'] = wallSlots;
 __e['addContainer'] = addContainer;
@@ -13469,14 +13484,19 @@ class Objectives {
           // slides stand together in a row; every other kind of target is spread round the circle
           const a = def.angle ?? (def.pickSafe ? base + i * 2.2 : base + i * 2.2 + (k * TAU) / count + rng.range(-0.35, 0.35));
           const d = def.pickSafe ? (st.slideD || (st.slideD = rng.range(def.dist[0], def.dist[1]))) : rng.range(def.dist[0], def.dist[1]);
-          const g = this.place(def.goal, from[0] + Math.cos(a) * d, from[1] + Math.sin(a) * d, from, rng, extra[k] || {});
+          const tx = from[0] + Math.cos(a) * d, tz = from[1] + Math.sin(a) * d;
+          let g = null;
+          if (def.atSpawn && k === 0) g = this.placeAtSpawn(def.goal, sp, extra[k] || {});
+          else if (def.floor !== undefined && this.world.gen && this.world.gen.floors) g = this.placeOnFloor(def.goal, def.floor, tx, tz, extra[k] || {});
+          else g = this.place(def.goal, tx, tz, from, rng, extra[k] || {});
           if (g) st.targets.push({ goal: g, x: g.x, z: g.z, done: false, ...(extra[k] || {}) });
         }
       } else if (def.item) {
         for (let k = 0; k < count; k++) {
           const a = base + i * 2.2 + (k * TAU) / count + rng.range(-0.4, 0.4);
           const d = rng.range(def.dist[0], def.dist[1]);
-          items.push({ item: def.item, x: from[0] + Math.cos(a) * d, z: from[1] + Math.sin(a) * d, stage: i });
+          const [ix, iz] = this.inBounds(from[0] + Math.cos(a) * d, from[1] + Math.sin(a) * d);
+          items.push({ item: def.item, x: ix, z: iz, stage: i });
         }
       } else if (def.reuse) {
         const p = this.stages[i - 1].def.reuse ? null : this.stages.slice(0, i).reverse().find((s) => s.targets.some((t) => t.goal));
@@ -13578,8 +13598,46 @@ class Objectives {
     return true;
   }
 
+  /** A level that is one building (a mall, a block of flats) keeps its goals inside its walls. */
+  inBounds(x, z) {
+    const b = this.world.gen && this.world.gen.bounds;
+    if (!b) return [x, z];
+    return [Math.max(b[0] + 3, Math.min(b[2] - 3, x)), Math.max(b[1] + 3, Math.min(b[3] - 3, z))];
+  }
+
+  /**
+   * A goal on one floor of a multi-storey level. The generator lists, per floor, the
+   * walls a goal can hang on (shop piers and corridor walls facing the gallery, the
+   * back walls inside) and the open spots inside the units.
+   */
+  placeOnFloor(type, floor, cx, cz, opts = {}) {
+    const fl = this.world.gen.floors, info = GOAL_INFO[type];
+    const f = Math.max(0, Math.min(fl.count - 1, floor | 0)), y = fl.y(f);
+    [cx, cz] = this.inBounds(cx, cz);
+    const far = (s) => this.goals.every((g) => Math.abs(g.y - y) > 1 || Math.hypot(g.x - s.x, g.z - s.z) > 4);
+    const near = (a, b) => Math.hypot(a.x - cx, a.z - cz) - Math.hypot(b.x - cx, b.z - cz);
+    if (info.wall) {
+      // exits and big doors go on the outside wall (inside a shop); panels anywhere
+      const outer = type.startsWith('door') || type === 'elevator';
+      const slots = fl.slots(f).filter(far).sort(near);
+      const pick = slots.find((s) => !outer || s.inside) || slots[0];
+      if (pick) return this.makeGoal(type, pick.x + pick.nx * 0.081, pick.z + pick.nz * 0.081, Math.atan2(pick.nx, pick.nz), opts, y);
+    }
+    const spots = fl.spots(f).filter(far).sort(near);
+    if (spots.length) return this.makeGoal(type, spots[0].x, spots[0].z, spots[0].rot + Math.PI, opts, y);
+    return null;
+  }
+
+  /** A stairwell level: the shaft stands round the spawn, so the level starts at the foot of the stairs. */
+  placeAtSpawn(type, sp, opts = {}) {
+    if (type !== 'stairshaft') return null;
+    // the bottom landing of the shaft is at local (0, +3.2): put the spawn there
+    return this.makeGoal(type, sp[0], sp[1] - 3.2, 0, { ...opts, sealed: true });
+  }
+
   place(type, cx, cz, from, rng, opts = {}) {
     let info = GOAL_INFO[type];
+    [cx, cz] = this.inBounds(cx, cz);
     const w = this.world, S = w.S;
     const others = this.goals;
     const farFromOthers = (x, z) => others.every((g) => Math.hypot(g.x - x, g.z - z) > 6);
@@ -13658,13 +13716,13 @@ class Objectives {
     return null;
   }
 
-  makeGoal(type, x, z, rot, opts = {}) {
-    const g = new Goal(this.game, type, x, this.world.groundAt(x, z), z, rot, opts);
+  makeGoal(type, x, z, rot, opts = {}, y = null) {
+    const g = new Goal(this.game, type, x, y ?? this.world.groundAt(x, z), z, rot, opts);
     this.goals.push(g);
     const info = GOAL_INFO[type];
     const f = g.focus;
     if (type === 'lantern') {
-      g.fixture = this.world.addExtraFixture({ x: f.x, y: 1.3, z: f.z, type: 'bulb', emit: 'omni', frame: false, color: [1.0, 0.68, 0.36], intensity: 2.2, flicker: FLICKER.OFF, soft: 0.6, range: 13 });
+      g.fixture = this.world.addExtraFixture({ x: f.x, y: g.y + 1.3, z: f.z, type: 'bulb', emit: 'omni', frame: false, color: [1.0, 0.68, 0.36], intensity: 2.2, flicker: FLICKER.OFF, soft: 0.6, range: 13 });
     } else if (type === 'stairs') {
       const R = opts.rise || 3, c = Math.cos(rot), sn = Math.sin(rot);
       for (const [lz, ly] of [[-2.2, R + 2.7], [2.0, R * 0.55 + 3.0], [5.2, R * 0.1 + 3.0]]) this.world.addExtraFixture({ x: x + lz * sn, y: g.y + ly, z: z + lz * c, type: 'bulb', emit: 'omni', frame: false, color: [1.0, 0.95, 0.82], intensity: 1.6, flicker: FLICKER.STEADY, soft: 0.6, range: 9 });
@@ -13683,7 +13741,7 @@ class Objectives {
     } else if (type.startsWith('door') || type === 'elevator' || type === 'hatch' || type === 'cabin') {
       const hex = parseInt(info.color.slice(1), 16);
       const col = [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
-      this.world.addExtraFixture({ x: f.x, y: type === 'hatch' ? 0.6 : 2.4, z: f.z, type: 'bulb', emit: 'omni', frame: false, color: col, intensity: 0.9, flicker: FLICKER.STEADY, soft: 0.6, range: 8 });
+      this.world.addExtraFixture({ x: f.x, y: g.y + (type === 'hatch' ? 0.6 : 2.4), z: f.z, type: 'bulb', emit: 'omni', frame: false, color: col, intensity: 0.9, flicker: FLICKER.STEADY, soft: 0.6, range: 8 });
     }
     return g;
   }
@@ -17145,7 +17203,7 @@ const THREE = __mod['vendor/three/build/three.module.js'];
 const { makeCollider: makeCollider, C: C } = __mod['src/world/collision.js'];
 const { FLICKER: FLICKER } = __mod['src/world/lights.js'];
 const { fbm2: fbm2, hashf: hashf, RNG: RNG, hash32: hash32 } = __mod['src/core/rng.js'];
-const { addProp: addProp, addContainer: addContainer, buildProps: buildProps, spaceFree: spaceFree, placeProps: placeProps, PROP_SETS: PROP_SETS } = __mod['src/world/props.js'];
+const { addProp: addProp, addContainer: addContainer, buildProps: buildProps, spaceFree: spaceFree, placeProps: placeProps, PROP_SETS: PROP_SETS, propColliders: propColliders } = __mod['src/world/props.js'];
 const { buildTree: buildTree } = __mod['src/world/gen/forest.js'];
 const { placeOutdoorWetness: placeOutdoorWetness, buildWetness: buildWetness, plantCard: plantCard } = __mod['src/world/wetness.js'];
 // Open, non-maze levels. No wall grid at all: each 32 m chunk is a piece of a
@@ -17303,7 +17361,13 @@ function makeOpenGen(mode, p = {}) {
     params: P,
 
     init(world, level) {
-      if (mode === 'cave') return; // underground: no sky at all
+      if (mode === 'mall' || mode === 'apartment') {
+        // multi-storey: entities, goals and checkpoints ask which floor something is on
+        this.floors = bldFloors(world, P);
+        const B = bldPlan(world, P);
+        this.bounds = [0.4, 0.4, B.W - 0.4, B.W - 0.4];
+      }
+      if (mode === 'cave' || mode === 'stairwell') return; // underground / indoors: no sky at all
       this.sky = makeSky(level);
       world.scene.add(this.sky);
     },
@@ -17326,6 +17390,8 @@ function makeOpenGen(mode, p = {}) {
       else if (mode === 'courtyard') layoutCourtyard(world, l, rng, P);
       else if (mode === 'heights') layoutHeights(world, l, rng, P);
       else if (mode === 'lot') layoutLot(world, l, rng, P);
+      else if (mode === 'mall' || mode === 'apartment') { layoutBuilding(world, l, rng, P); return; }
+      else if (mode === 'stairwell') { l.puddles = []; l.drips = []; l.plants = []; l.moss = []; l.stains = []; return; }
       else layoutOcean(world, l, rng, P);
       // the level's furniture set, placed last so it avoids whatever the mode
       // just built. Out here the floor is not always at y = 0: the hills roll,
@@ -17346,6 +17412,8 @@ function makeOpenGen(mode, p = {}) {
       else if (mode === 'courtyard') buildCourtyard(world, l, b, P);
       else if (mode === 'heights') buildHeights(world, l, b, P);
       else if (mode === 'lot') buildLot(world, l, b, P);
+      else if (mode === 'mall' || mode === 'apartment') buildBuilding(world, l, b, P);
+      else if (mode === 'stairwell') buildStairwellGround(world, l, b, P);
       else buildOcean(world, l, b, P);
       for (const t of l.trees) buildTree(b, t);
       buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)), world, ctx);
@@ -17377,6 +17445,466 @@ function makeOpenGen(mode, p = {}) {
     },
   };
   return gen;
+}
+
+// ------------------------------------------------------------------ malls and apartment blocks
+// A real building, 3 to 6 storeys round an open atrium. Shops (or flats) line the
+// outside walls, with windows to the car park; a gallery runs round the atrium on
+// every floor behind a glass railing; escalators (or, in a block of flats, stairs)
+// climb across the atrium from floor to floor; a fountain plays at the bottom and
+// a skylight closes the top. The building stands at x, z in [0, W] (two chunks a
+// side for a mall); the chunks round it are its car park.
+//
+// The whole building is planned once (bldPlan) as world-space boxes, props and
+// lights; every chunk then clips its own share out of the plan, so walls, slabs
+// and the long escalators collide the same from either side of a chunk border.
+const BLD_STYLES = {
+  mall: {
+    W: 64, S1: 13, A0: 20, SH: 4.5, floors: 4, unit: [9, 13], climb: 0.58,
+    wall: 'drywall', pier: 'metal_white', gallery: 'terrazzo', ceil: 'ceiling_white', slab: 'concrete_painted', ground: 'marble_floor', outer: 'concrete',
+    rail: 'chrome', unitFloors: ['floor_tile', 'vct_school', 'laminate', 'carpet_office', 'wood_floor', 'terrazzo'],
+    unitWalls: ['drywall', 'drywall_grey', 'drywall_blue', 'drywall_peach', 'drywall_green', 'wall_tile'],
+    signs: ['paint_red', 'metal_blue', 'metal_yellow', 'metal_green', 'plastic_orange', 'paint_black', 'metal_white'],
+  },
+  apartment: {
+    W: 48, S1: 9, A0: 13, SH: 3.2, floors: 5, unit: [6, 8], climb: 0.72,
+    wall: 'plaster_old', pier: 'wood_dark', gallery: 'carpet_hotel', ceil: 'ceiling_dirty', slab: 'concrete', ground: 'floor_tile', outer: 'brick_red',
+    rail: 'metal_dark', unitFloors: ['wood_floor', 'carpet_hotel_blue', 'laminate', 'carpet_green', 'carpet_red'],
+    unitWalls: ['wallpaper_rose', 'wallpaper_blue', 'damask_green', 'drywall_peach', 'plaster_old', 'damask_hotel'],
+    signs: ['wood_dark'],
+  },
+};
+const BSOLID = C.SOLID | C.OCCLUDE, BGLASS = C.SOLID;
+
+function bldPlan(world, P) {
+  const key = (world.seed >>> 0) + ':' + world.levelSalt + ':' + P.mode;
+  if (world._bld && world._bld.key === key) return world._bld;
+  const st = BLD_STYLES[P.mode] || BLD_STYLES.mall;
+  const rng = new RNG(hash32(world.seed >>> 0, 0xb17d, world.levelSalt >>> 0));
+  const W = st.W, S1 = st.S1, A0 = st.A0, A1 = W - A0, SH = P.storey || st.SH;
+  const F = Math.max(3, Math.min(6, Math.round(P.floors || st.floors)));
+  const mall = P.mode !== 'apartment';
+  const B = { key, P, st, mall, W, S1, A0, A1, SH, F, boxes: [], props: [], fixtures: [], containers: [], items: [], slots: [], spots: [], gaps: [] };
+  for (let f = 0; f < F; f++) { B.slots.push([]); B.spots.push([]); B.gaps.push([]); }
+  const box = (mat, x0, y0, z0, x1, y1, z1, col = BSOLID, o = {}) => {
+    if (x1 - x0 < 0.001 || y1 - y0 < 0.001 || z1 - z0 < 0.001) return;
+    B.boxes.push({ mat, x0, y0, z0, x1, y1, z1, col, faces: o.faces, seg: o.seg, uv: o.uv });
+  };
+  const prop = (type, x, y, z, rot, opts = {}) => B.props.push({ type, x, y, z, rot, opts, seed: rng.int(0, 1e9) });
+  const light = (x, y, z, color, intensity, flicker, range, kind = 'troffer') => { const fx = lampFixture(x, y, z, color, intensity, flicker, range); fx.look = kind; B.fixtures.push(fx); return fx; };
+  const T = 0.15;                                     // wall thickness
+
+  // ---- the shell: outer walls with a row of windows on every floor
+  const winEvery = 4, winW = 2.4;
+  for (let f = 0; f < F; f++) {
+    const y0 = f * SH, sill = y0 + 1.0, head = y0 + SH - 0.7, y1 = y0 + SH;
+    for (const side of ['n', 's', 'w', 'e']) {
+      const along = (a0, a1, yy0, yy1, mat, col) => {
+        if (side === 'n') box(mat, a0, yy0, 0, a1, yy1, 0.3, col, { seg: 2 });
+        else if (side === 's') box(mat, a0, yy0, W - 0.3, a1, yy1, W, col, { seg: 2 });
+        else if (side === 'w') box(mat, 0, yy0, a0, 0.3, yy1, a1, col, { seg: 2 });
+        else box(mat, W - 0.3, yy0, a0, W, yy1, a1, col, { seg: 2 });
+      };
+      along(0, W, y0, sill, st.outer, BSOLID);
+      along(0, W, head, y1, st.outer, BSOLID);
+      let c = 0;
+      for (let a = winEvery / 2; a < W; a += winEvery) {
+        const w0 = a - winW / 2, w1 = a + winW / 2;
+        if (w0 < 0.6 || w1 > W - 0.6) continue;
+        along(c, w0, sill, head, st.outer, BSOLID);
+        // the glass sits in the middle of the wall: it keeps you in, it does not keep the light out
+        if (side === 'n') box('glass', w0, sill, 0.13, w1, head, 0.17, BGLASS);
+        else if (side === 's') box('glass', w0, sill, W - 0.17, w1, head, W - 0.13, BGLASS);
+        else if (side === 'w') box('glass', 0.13, sill, w0, 0.17, head, w1, BGLASS);
+        else box('glass', W - 0.17, sill, w0, W - 0.13, head, w1, BGLASS);
+        c = w1;
+      }
+      along(c, W, sill, head, st.outer, BSOLID);
+    }
+  }
+
+  // ---- units: shops (or flats) in four strips round the outside
+  const units = [];
+  const strip = (side, from, to, firstMin) => {
+    const cuts = [from];
+    let a = Math.max(from + st.unit[0], firstMin + rng.range(st.unit[0], st.unit[1]) * 0.6);
+    while (a < to - st.unit[0] * 0.8 - (firstMin > from ? S1 : 0)) { cuts.push(a); a += rng.range(st.unit[0], st.unit[1]); }
+    cuts.push(to);
+    for (let i = 0; i + 1 < cuts.length; i++) units.push({ side, a0: cuts[i], a1: cuts[i + 1] });
+  };
+  strip('n', 0.3, W - 0.3, S1); strip('s', 0.3, W - 0.3, S1); strip('w', S1, W - S1, S1); strip('e', S1, W - S1, S1);
+  // where a unit's front faces the gallery, and which way is out
+  for (const u of units) {
+    const ns = u.side === 'n' || u.side === 's';
+    u.g0 = ns ? Math.max(u.a0, S1) : u.a0; u.g1 = ns ? Math.min(u.a1, W - S1) : u.a1;   // gallery-facing span
+    u.front = u.side === 'n' ? S1 : u.side === 's' ? W - S1 : u.side === 'w' ? S1 : W - S1;
+    u.n = u.side === 'n' ? [0, 1] : u.side === 's' ? [0, -1] : u.side === 'w' ? [1, 0] : [-1, 0];
+    u.d0 = u.side === 'n' || u.side === 'w' ? 0.3 : u.front;
+    u.d1 = u.side === 'n' || u.side === 'w' ? u.front : W - 0.3;
+    u.door = (u.g0 + u.g1) / 2 + rng.range(-1, 1) * Math.max(0, (u.g1 - u.g0) / 2 - (mall ? 2.4 : 1.2));
+  }
+  B.units = units;
+  // a box in a unit's own frame: along = a, depth = d (measured from the front, into the unit)
+  const ubox = (u, mat, a0, a1, y0, y1, d0, d1, col = BSOLID, o = {}) => {
+    const [nx, nz] = u.n;
+    // depth axis points from the front into the unit, i.e. against the outward normal
+    const za = u.front - nz * d0, zb = u.front - nz * d1, xa = u.front - nx * d0, xb = u.front - nx * d1;
+    if (nx === 0) box(mat, Math.min(a0, a1), y0, Math.min(za, zb), Math.max(a0, a1), y1, Math.max(za, zb), col, o);
+    else box(mat, Math.min(xa, xb), y0, Math.min(a0, a1), Math.max(xa, xb), y1, Math.max(a0, a1), col, o);
+  };
+  const uxz = (u, a, d) => (u.n[0] === 0 ? [a, u.front - u.n[1] * d] : [u.front - u.n[0] * d, a]);
+  const urot = (u) => Math.atan2(u.n[0], u.n[1]);     // a prop facing out of the unit
+  const depthOf = (u) => Math.abs(u.d1 - u.d0);
+
+  // ---- floors, ceilings and slabs (the slab of floor f is the ceiling of floor f-1)
+  for (let f = 1; f <= F; f++) {
+    const y = f * SH;
+    const rects = [[0, 0, W, A0], [0, A1, W, W], [0, A0, A0, A1], [A1, A0, W, A1]];
+    for (const [x0, z0, x1, z1] of rects) box(st.slab, x0, y - 0.3, z0, x1, y, z1, BSOLID | C.PLATFORM, { faces: 1 | 2 | 16 | 32, seg: 3 });
+    // ceiling of the floor below: gallery ceiling and unit ceilings
+    for (const [x0, z0, x1, z1] of rects) box(st.ceil, x0, y - 0.3, z0, x1, y - 0.3 + 0.001, z1, 0, { faces: 8, seg: 2 });
+    if (f === F) {
+      // the roof: the atrium is a skylight
+      box('glass', A0, y - 0.1, A0, A1, y, A1, BGLASS, { faces: 8 | 4 });
+      for (let k = 1; k < 4; k++) { const a = A0 + (A1 - A0) * k / 4; box('metal_white', a - 0.08, y - 0.3, A0, a + 0.08, y, A1, 0); box('metal_white', A0, y - 0.3, a - 0.08, A1, y, a + 0.08, 0); }
+      box(st.outer, -0.2, y, -0.2, W + 0.2, y + 0.6, W + 0.2, 0, { faces: 1 | 2 | 16 | 32 | 4 });
+    }
+  }
+  // floor finishes: gallery ring, unit floors, the atrium at the bottom
+  for (let f = 0; f < F; f++) {
+    const y = f * SH + 0.002;
+    for (const [x0, z0, x1, z1] of [[S1, S1, W - S1, A0], [S1, A1, W - S1, W - S1], [S1, A0, A0, A1], [A1, A0, W - S1, A1]]) box(f ? st.gallery : st.ground, x0, y - 0.002, z0, x1, y, z1, 0, { faces: 4, seg: 2 });
+    if (f === 0) box(st.ground, A0, 0, A0, A1, 0.002, A1, 0, { faces: 4, seg: 2 });
+    for (const u of units) {
+      u.floors = u.floors || [];
+      const r = new RNG(hash32(key.length, u.a0 * 100 | 0, u.front * 100 | 0, f));
+      const un = { kind: 'open', floor: r.pick(st.unitFloors), wall: r.pick(st.unitWalls), sign: r.pick(st.signs), lit: r.chance(mall ? 0.5 : 0.4), seed: r.int(1, 1e9) };
+      if (mall) un.kind = r.chance(0.22) ? 'shutter' : 'open';
+      else un.kind = r.chance(0.3) ? 'locked' : 'open';
+      if (f === 0 && Math.hypot(...uxz(u, u.door, 1).map((v, i) => v - (world.level.spawn || [16, 16])[i])) < 10) un.kind = 'open';
+      u.floors.push(un);
+      ubox(u, un.floor, u.a0 + 0.08, u.a1 - 0.08, y - 0.002, y, 0.01, depthOf(u), 0, { faces: 4, seg: 2 });
+    }
+  }
+
+  // ---- unit walls: partitions, the back is the outer wall, the front faces the gallery
+  for (const u of units) {
+    for (let f = 0; f < F; f++) {
+      const un = u.floors[f], y0 = f * SH, y1 = (f + 1) * SH - 0.3, D = depthOf(u);
+      // partitions at both ends (the strip ends are the outer walls)
+      // (each unit builds the wall at its own start; the last unit of a side strip closes the strip)
+      const ends = [u.a0];
+      if ((u.side === 'w' || u.side === 'e') && Math.abs(u.a1 - (W - S1)) < 0.01) ends.push(u.a1);
+      for (const a of ends) if (a > 0.31 && a < W - 0.31) ubox(u, st.wall, a - T / 2, a + T / 2, y0, y1, 0, D, BSOLID, { seg: 2 });
+      // the inner face of the outer walls and the partitions, in the unit's colour
+      ubox(u, un.wall, u.a0 + T / 2, u.a1 - T / 2, y0, y1, D - 0.01, D, 0, { seg: 2, faces: u.n[0] === 0 ? (u.n[1] > 0 ? 16 : 32) : (u.n[0] > 0 ? 1 : 2) });
+      // corner shops: the part of the front that faces another strip is plain wall
+      if (u.g0 > u.a0 + 0.01) ubox(u, un.wall, u.a0, u.g0, y0, y1, 0, T, BSOLID, { seg: 2 });
+      if (u.g1 < u.a1 - 0.01) ubox(u, un.wall, u.g1, u.a1, y0, y1, 0, T, BSOLID, { seg: 2 });
+      // the front
+      const g0 = u.g0, g1 = u.g1, dw = mall ? 1.6 : 0.55, door0 = u.door - dw, door1 = u.door + dw;
+      if (mall) {
+        const head = y0 + SH - 1.2;
+        // piers at both ends (posters go on these), the sign band above, glass between
+        ubox(u, st.pier, g0, g0 + 0.7, y0, y1, 0, T + 0.05, BSOLID);
+        ubox(u, st.pier, g1 - 0.7, g1, y0, y1, 0, T + 0.05, BSOLID);
+        ubox(u, un.kind === 'shutter' ? 'corrugated' : un.sign, g0 + 0.7, g1 - 0.7, head, y1, 0, T, BSOLID);
+        if (un.kind === 'shutter') {
+          ubox(u, 'corrugated', g0 + 0.7, g1 - 0.7, y0, head, 0.02, T - 0.02, BSOLID);
+          ubox(u, 'metal_dark', g0 + 0.7, g1 - 0.7, y0, y0 + 0.08, -0.02, T + 0.02, 0);
+        } else {
+          ubox(u, 'metal_dark', g0 + 0.7, door0, y0, y0 + 0.3, 0, T, BSOLID);
+          ubox(u, 'metal_dark', door1, g1 - 0.7, y0, y0 + 0.3, 0, T, BSOLID);
+          ubox(u, 'glass', g0 + 0.7, door0, y0 + 0.3, head, 0.05, 0.1, BGLASS);
+          ubox(u, 'glass', door1, g1 - 0.7, y0 + 0.3, head, 0.05, 0.1, BGLASS);
+          for (const a of [door0, door1]) ubox(u, 'chrome', a - 0.05, a + 0.05, y0, head, 0, T, BSOLID);
+          if (un.lit) ubox(u, 'fixture_cold', g0 + 1.2, g1 - 1.2, head + 0.25, head + 0.5, -0.03, 0, 0);
+        }
+        for (const [a0, a1] of [[g0, g0 + 0.7], [g1 - 0.7, g1]]) {
+          // a poster on every pier
+          const r = new RNG(hash32(un.seed, a0 * 10 | 0));
+          if (r.chance(0.8)) ubox(u, r.pick(['art_a', 'art_b', 'art_c', 'art_d']), a0 + 0.08, a1 - 0.08, y0 + 1.1, y0 + 2.4, -0.012, 0, 0, { uv: 'unit' });
+        }
+      } else {
+        // a corridor wall with one door to each flat, and a framed print beside it
+        ubox(u, st.wall, g0, door0, y0, y1, 0, T, BSOLID, { seg: 2 });
+        ubox(u, st.wall, door1, g1, y0, y1, 0, T, BSOLID, { seg: 2 });
+        ubox(u, st.wall, door0, door1, y0 + 2.15, y1, 0, T, BSOLID);
+        for (const a of [door0, door1]) ubox(u, 'wood_dark', a - 0.05, a + 0.05, y0, y0 + 2.2, -0.02, T + 0.02, 0);
+        ubox(u, 'wood_dark', door0 - 0.05, door1 + 0.05, y0 + 2.15, y0 + 2.22, -0.02, T + 0.02, 0);
+        if (un.kind === 'locked') ubox(u, 'wood_door', door0, door1, y0, y0 + 2.15, 0.03, T - 0.03, BSOLID);
+        const r = new RNG(hash32(un.seed, 7));
+        const pa = u.door + (r.chance(0.5) ? 1 : -1) * 1.6;
+        if (pa - 0.4 > g0 && pa + 0.4 < g1 && r.chance(0.7)) {
+          ubox(u, 'wood_dark', pa - 0.36, pa + 0.36, y0 + 1.2, y0 + 1.95, -0.03, 0, 0);
+          ubox(u, r.pick(['art_a', 'art_b', 'art_c', 'art_d']), pa - 0.3, pa + 0.3, y0 + 1.26, y0 + 1.89, -0.035, -0.03, 0, { uv: 'unit' });
+        }
+        // a flat number over the door
+        ubox(u, 'brass', u.door - 0.12, u.door + 0.12, y0 + 2.3, y0 + 2.4, -0.02, 0, 0);
+      }
+      // wall slots facing the gallery (piers, corridor walls) for wall-mounted goals on this floor
+      const sa = mall ? g0 + 0.35 : (u.door - dw - 0.8 > g0 + 0.6 ? u.door - dw - 0.8 : null);
+      if (sa !== null && un.kind !== 'shutter') { const [x, z] = uxz(u, sa, 0); B.slots[f].push({ x: x + u.n[0] * 0.0, z: z + u.n[1] * 0.0, nx: u.n[0], nz: u.n[1], unit: u, f }); }
+      // and the back wall inside, facing in
+      if (un.kind === 'open') {
+        // on a pier between two windows of the outer wall (windows are centred every 4 m)
+        let pa = Math.round((u.a0 + u.a1) / 8) * 4;
+        if (pa < u.a0 + 1.2 || pa > u.a1 - 1.2) pa = (u.a0 + u.a1) / 2;
+        const [x, z] = uxz(u, pa, depthOf(u));
+        // (the back wall faces into the shop, toward the gallery: the same way as the shop's front)
+        B.slots[f].push({ x, z, nx: u.n[0], nz: u.n[1], unit: u, f, inside: true });
+        const [sx, sz] = uxz(u, (Math.max(u.a0, g0) + Math.min(u.a1, g1)) / 2, Math.min(D * 0.5, 4));
+        B.spots[f].push({ x: sx, z: sz, rot: urot(u), unit: u });
+      }
+      // a light in each unit: half of them dead (nobody has paid the bill)
+      const [lx, lz] = uxz(u, (u.a0 + u.a1) / 2, D / 2);
+      const dead = !un.lit && un.kind !== 'locked';
+      if (un.kind !== 'shutter' && un.kind !== 'locked') {
+        const fx = light(lx, y1 - 0.05, lz, mall ? [0.9, 0.96, 1.0] : [1.0, 0.82, 0.6], mall ? 2.2 : 1.6, dead ? FLICKER.DEAD : (rng.chance(0.2) ? FLICKER.BUZZ : FLICKER.STEADY), mall ? 12 : 9, mall ? 'troffer' : 'bulb');
+        fx.unit = true;
+      }
+      // what is left in it
+      if (un.kind === 'open') furnish(B, u, f, un, uxz, urot, depthOf(u), prop, rng);
+    }
+  }
+
+  // ---- galleries: glass railings round the atrium, gaps where the escalators land
+  const climbs = [];
+  const len = SH / Math.tan(Math.atan(st.climb)), total = len + 1.6, nSteps = Math.max(12, Math.round(SH / 0.2));
+  for (let f = 0; f + 1 < F; f++) {
+    const north = f % 2 === 0, zc = north ? A0 + 1.06 : A1 - 1.06, cx = A0 + 0.05 + 0.2 + total / 2;
+    const top0 = cx + total / 2 - 0.8, top1 = cx + total / 2;
+    climbs.push({ f, zc, cx, top0, top1, north });
+    prop('escalator', cx, f * SH, zc, Math.PI / 2, { len, rise: SH, steps: nSteps, still: !mall, landings: false, deck: mall ? 'metal_grey' : 'concrete', side: mall ? 'metal_white' : 'concrete' });
+    // the bottom gets on from the west gallery, the top gets off sideways onto the north / south gallery
+    B.gaps[f].push({ edge: 'w', a0: zc - 0.95, a1: zc + 0.95 });
+    B.gaps[f + 1].push({ edge: north ? 'n' : 's', a0: top0 - 0.3, a1: top1 + 0.1 });
+    // a stop at the far end of the top landing, so nobody walks off into the atrium
+    const y = (f + 1) * SH;
+    box(st.rail, top1, y, zc - 0.85, top1 + 0.08, y + 1.1, zc + 0.85, BGLASS);
+    // the gap between the gallery edge and the lane is bridged on both landings
+    const ez = north ? [A0 - 0.02, zc - 0.7] : [zc + 0.7, A1 + 0.02];
+    box(st.gallery, top0 - 0.25, y - 0.2, ez[0], top1, y, ez[1], C.SOLID | C.PLATFORM, { faces: 4 | 8 });
+    if (f > 0) box(st.gallery, A0 - 0.02, f * SH - 0.2, zc - 0.85, A0 + 0.3, f * SH, zc + 0.85, C.SOLID | C.PLATFORM, { faces: 4 | 8 });
+  }
+  B.climbs = climbs;
+  for (let f = 1; f < F; f++) {
+    const y = f * SH;
+    for (const edge of ['n', 's', 'w', 'e']) {
+      const gaps = B.gaps[f].filter((g) => g.edge === edge).sort((p, q) => p.a0 - q.a0);
+      let a = A0;
+      const run = (a0, a1) => {
+        if (a1 - a0 < 0.05) return;
+        const line = edge === 'n' || edge === 'w' ? A0 : A1;
+        const [lx0, lx1] = [line - 0.04, line + 0.04];
+        if (edge === 'n' || edge === 's') {
+          box('glass', a0, y + 0.06, lx0, a1, y + 1.0, lx1, BGLASS);
+          box(st.rail, a0, y + 1.0, lx0 - 0.03, a1, y + 1.08, lx1 + 0.03, 0);
+          box(st.rail, a0, y, lx0 - 0.02, a1, y + 0.06, lx1 + 0.02, 0);
+        } else {
+          box('glass', lx0, y + 0.06, a0, lx1, y + 1.0, a1, BGLASS);
+          box(st.rail, lx0 - 0.03, y + 1.0, a0, lx1 + 0.03, y + 1.08, a1, 0);
+          box(st.rail, lx0 - 0.02, y, a0, lx1 + 0.02, y + 0.06, a1, 0);
+        }
+      };
+      for (const g of gaps) { run(a, g.a0); a = Math.max(a, g.a1); }
+      run(a, A1);
+    }
+  }
+  // columns at the corners of the atrium, ground to roof
+  for (const [x, z] of [[A0 - 0.5, A0 - 0.5], [A1 + 0.5, A0 - 0.5], [A0 - 0.5, A1 + 0.5], [A1 + 0.5, A1 + 0.5]]) {
+    box(mall ? 'marble_floor' : st.slab, x - 0.35, 0, z - 0.35, x + 0.35, F * SH, z + 0.35, BSOLID, { seg: 2 });
+  }
+
+  // ---- gallery lights, under every slab, and pendant lamps hanging into the atrium
+  for (let f = 0; f < F; f++) {
+    const y = (f + 1) * SH - 0.32, mid = (S1 + A0) / 2, mid2 = W - mid;
+    for (let a = S1 + 2; a < W - S1 - 1; a += mall ? 6 : 5) {
+      for (const [x, z] of [[a, mid], [a, mid2]]) light(x, y, z, mall ? [1.0, 0.96, 0.88] : [1.0, 0.8, 0.55], mall ? 2.6 : 1.7, rng.chance(0.08) ? FLICKER.DEAD : (rng.chance(0.1) ? FLICKER.BUZZ : FLICKER.STEADY), mall ? 13 : 9, mall ? 'troffer' : 'bulb');
+    }
+    for (let a = A0 + 2; a < A1 - 1; a += mall ? 6 : 5) {
+      for (const [x, z] of [[mid, a], [mid2, a]]) light(x, y, z, mall ? [1.0, 0.96, 0.88] : [1.0, 0.8, 0.55], mall ? 2.6 : 1.7, rng.chance(0.08) ? FLICKER.DEAD : FLICKER.STEADY, mall ? 13 : 9, mall ? 'troffer' : 'bulb');
+    }
+  }
+  for (let f = 1; f <= F; f++) {
+    for (const [x, z] of [[A0 + 4, A0 + 5], [A1 - 4, A0 + 5], [A0 + 4, A1 - 5], [A1 - 4, A1 - 5]]) {
+      if (f === F || rng.chance(0.5)) light(x, f * SH - 1.6, z, [1.0, 0.9, 0.72], f === F ? 4.2 : 2.4, FLICKER.STEADY, f === F ? 22 : 14, 'pendant');
+    }
+  }
+
+  // ---- the atrium floor: a fountain, palms and planters, benches round them
+  const ax = (A0 + A1) / 2;
+  if (P.fountain !== false) {
+    B.items.push({ kind: 'fountain', x: ax, z: ax, r: mall ? 3.2 : 2.4 });
+    const r = mall ? 3.2 : 2.4;
+    box('statue_marble', ax - r * 0.72, 0, ax - r * 0.72, ax + r * 0.72, 0.62, ax + r * 0.72, C.SOLID | C.PLATFORM, { faces: 0 });
+    box('statue_marble', ax - 0.35, 0, ax - 0.35, ax + 0.35, 2.6, ax + 0.35, C.SOLID, { faces: 0 });
+    light(ax, 0.9, ax, [0.55, 0.85, 1.0], 1.6, FLICKER.STEADY, 9, 'under');
+  }
+  const ring = mall ? 7.2 : 5.0;
+  for (let k = 0; k < 8; k++) {
+    const a = k * Math.PI / 4 + Math.PI / 8, x = ax + Math.cos(a) * ring, z = ax + Math.sin(a) * ring;
+    if (climbs.some((c) => Math.abs(z - c.zc) < 2.2 && x < c.top1 + 1)) continue;
+    if (k % 2) prop(mall ? 'palm_tree' : 'planter', x, 0, z, a, {});
+    else prop('bench', x, 0, z, a + Math.PI / 2, { mat: 'wood_dark' });
+  }
+  // planters and benches along the galleries, upstairs too
+  for (let f = 0; f < F; f++) {
+    for (const [x, z] of [[S1 + 1.0, S1 + 1.0], [W - S1 - 1.0, S1 + 1.0], [S1 + 1.0, W - S1 - 1.0], [W - S1 - 1.0, W - S1 - 1.0]]) prop('planter', x, f * SH, z, 0, {});
+    if (f > 0) for (const [x, z, rot] of [[A1 + 1.2, ax, Math.PI / 2], [ax + 6, A1 + 1.2, 0]]) prop('bench', x, f * SH, z, rot, { mat: 'wood_dark' });
+  }
+  return (world._bld = B);
+}
+
+/** What is left in a unit: shelves stripped bare, racks with nothing on them, a counter; a bed and a sofa in a flat. */
+function furnish(B, u, f, un, uxz, urot, D, prop, rng0) {
+  const r = new RNG(hash32(un.seed, 0xf0));
+  const y = f * B.SH, w = u.a1 - u.a0, mid = (u.a0 + u.a1) / 2, back = urot(u) + Math.PI;
+  const put = (type, a, d, rot, opts = {}) => {
+    if (a < u.a0 + 0.8 || a > u.a1 - 0.8 || d < 1.2 || d > D - 0.5) return;
+    const [x, z] = uxz(u, a, d);
+    prop(type, x, y, z, rot, opts);
+  };
+  const box = (kind, a, d, rot) => {
+    if (a < u.a0 + 0.8 || a > u.a1 - 0.8 || d < 1.2 || d > D - 0.6) return;
+    const [x, z] = uxz(u, a, d);
+    B.containers.push({ kind, x, y, z, rot, f });
+  };
+  if (B.mall) {
+    const kind = r.pick(['shop', 'shop', 'clothes', 'food', 'bare']);
+    // shelves against the back wall
+    if (kind !== 'food') for (let a = u.a0 + 1.2; a < u.a1 - 1.0; a += 1.3) if (r.chance(0.8)) put('shelf', a, D - 0.45, back);
+    if (kind === 'shop') for (let a = u.a0 + 2; a < u.a1 - 1.5; a += 3) put('shelf', a, D * 0.5, back + (r.chance(0.5) ? Math.PI : 0));
+    if (kind === 'clothes') for (let k = 0; k < r.int(2, 4); k++) put('costume_rack', u.a0 + r.range(1.5, w - 1.5), r.range(2, D - 2), r.range(0, 3));
+    if (kind === 'food') for (let k = 0; k < r.int(2, 4); k++) { const a = u.a0 + r.range(1.5, w - 1.5), d = r.range(2.2, D - 2); put('table', a, d, 0); put('chair_plastic', a + 0.7, d, -Math.PI / 2); }
+    if (kind !== 'bare') box('counter', u.a0 + 1.4, 2.0, urot(u));
+    if (r.chance(0.6)) box('box', mid + r.range(-w / 3, w / 3), r.range(1.6, D - 1), r.range(0, 6));
+    if (r.chance(0.35)) put('shopping_cart', mid + r.range(-w / 3, w / 3), r.range(1.6, D - 1.5), r.range(0, 6));
+    if (r.chance(0.5)) put('box_stack', u.a1 - 1.2, D - 1.4, 0);
+  } else {
+    put('bed', u.a0 + 1.4, D - 1.4, back);
+    box('nightstand', u.a0 + 2.6, D - 0.5, back);
+    put('couch', u.a1 - 1.8, D * 0.45, urot(u) + Math.PI / 2);
+    put('table', mid, D * 0.55, 0);
+    if (r.chance(0.6)) put('tv_old', u.a1 - 1.0, D - 0.6, back);
+    if (r.chance(0.5)) box('dresser', mid + 1.0, D - 0.5, back);
+    if (r.chance(0.5)) put('lamp_floor', u.a0 + 1.0, 1.4, 0);
+    if (r.chance(0.4)) box('box', mid - 1.0, 1.8, r.range(0, 6));
+  }
+  void rng0;
+}
+
+/** Is (x, z) inside the building? On floor f >= 1, is there floor under it (not the atrium)? */
+function bldSlab(B, x, z, f) {
+  if (x < 0 || z < 0 || x > B.W || z > B.W) return f === 0;
+  if (f <= 0) return true;
+  if (x > B.A0 && x < B.A1 && z > B.A0 && z < B.A1) return false;
+  return true;
+}
+
+function clipBox(bx, l) {
+  const x0 = Math.max(bx.x0, l.x0), x1 = Math.min(bx.x1, l.x0 + CH), z0 = Math.max(bx.z0, l.z0), z1 = Math.min(bx.z1, l.z0 + CH);
+  return x1 - x0 > 0.0005 && z1 - z0 > 0.0005 ? [x0, z0, x1, z1] : null;
+}
+const ownsXZ = (l, x, z) => x >= l.x0 && x < l.x0 + CH && z >= l.z0 && z < l.z0 + CH;
+
+function layoutBuilding(world, l, rng, P) {
+  const B = bldPlan(world, P);
+  l.puddles = []; l.drips = []; l.plants = []; l.moss = []; l.stains = [];
+  const inside = l.x0 < B.W && l.z0 < B.W && l.x0 + CH > 0 && l.z0 + CH > 0;
+  if (!inside) {
+    // the car park outside: lamps and wrecks to look at through the windows, nothing to search
+    layoutLot(world, l, rng); l.lot = true;
+    l.containers = []; l.spawns = []; l.customSlots = [];
+    return;
+  }
+  l.bld = B;
+  l.boxes = [];
+  for (const bx of B.boxes) {
+    const c = clipBox(bx, l);
+    if (!c) continue;
+    l.boxes.push({ ...bx, x0: c[0], z0: c[1], x1: c[2], z1: c[3] });
+    if (bx.col) l.colliders.add(makeCollider(c[0], bx.y0, c[1], c[2], bx.y1, c[3], bx.col));
+  }
+  // props: geometry in the chunk that owns the centre, colliders clipped into every chunk they touch
+  for (const gp of B.props) {
+    for (const { a, carry } of propColliders(gp.type, gp.x, gp.y, gp.z, gp.rot, gp.opts)) {
+      const c = clipBox({ x0: a[0], x1: a[3], z0: a[2], z1: a[5] }, l);
+      if (!c) continue;
+      const col = makeCollider(c[0], a[1], c[1], c[2], a[4], c[3], C.SOLID | C.PLATFORM);
+      if (carry) col.carry = carry;
+      l.colliders.add(col);
+    }
+    if (ownsXZ(l, gp.x, gp.z)) l.props.push({ type: gp.type, x: gp.x, y: gp.y, z: gp.z, rot: gp.rot, opts: gp.opts, seed: gp.seed, scale: 1 });
+  }
+  for (const ct of B.containers) if (ownsXZ(l, ct.x, ct.z)) addContainer(l, ct.kind, ct.x, ct.y, ct.z, ct.rot, rng, {});
+  for (const fx of B.fixtures) if (ownsXZ(l, fx.x, fx.z)) l.fixtures.push({ ...fx });
+  for (const it of B.items) if (ownsXZ(l, it.x, it.z)) l.items.push(it);
+  // ground-floor wall slots: the ordinary (floor-less) wall goals hang on these
+  for (const s of B.slots[0]) if (ownsXZ(l, s.x, s.z)) slot(world, l, s.x + s.nx * 0.08, s.z + s.nz * 0.08, s.nx, s.nz);
+}
+
+function buildBuilding(world, l, b) {
+  if (l.lot) { buildLot(world, l, b); return; }
+  const B = l.bld;
+  // car park round the building (inside this chunk)
+  const x1 = l.x0 + CH, z1 = l.z0 + CH;
+  if (x1 > B.W) ground(b, 'asphalt', Math.max(l.x0, B.W), l.z0, x1, z1, 0, 2);
+  if (z1 > B.W) ground(b, 'asphalt', l.x0, Math.max(l.z0, B.W), Math.min(x1, B.W), z1, 0, 2);
+  for (const bx of l.boxes) {
+    if (bx.faces === 0) continue;
+    const o = { seg: bx.seg || 0 };
+    if (bx.faces !== undefined) o.faces = bx.faces;
+    if (bx.uv) { o.uv = bx.uv; o.nu = 1; o.nv = 1; }
+    b.box(bx.mat, bx.x0, bx.y0, bx.z0, bx.x1, bx.y1, bx.z1, o);
+  }
+  for (const fx of l.fixtures) {
+    if (fx.look === 'troffer') b.box('fixture_troffer', fx.x - 0.6, fx.y - 0.03, fx.z - 0.3, fx.x + 0.6, fx.y + 0.04, fx.z + 0.3, { slot: fx.slot, uv: 'unit' });
+    else if (fx.look === 'pendant') {
+      b.cylinder('metal_dark', fx.x, fx.y + 0.3, fx.z, 0.012, 1.3, { segments: 4 });
+      b.cylinder('brass', fx.x, fx.y + 0.15, fx.z, 0.45, 0.18, { segments: 14, rTop: 0.12 });
+      b.box('fixture_bulb', fx.x - 0.16, fx.y - 0.05, fx.z - 0.16, fx.x + 0.16, fx.y + 0.15, fx.z + 0.16, { slot: fx.slot, uv: 'unit' });
+    } else if (fx.look === 'bulb') b.box('fixture_bulb', fx.x - 0.12, fx.y - 0.12, fx.z - 0.12, fx.x + 0.12, fx.y + 0.04, fx.z + 0.12, { slot: fx.slot, uv: 'unit' });
+  }
+  for (const it of l.items) {
+    if (it.kind === 'fountain') {
+      const r = it.r;
+      b.cylinder('statue_marble', it.x, 0, it.z, r, 0.62, { segments: 32 });
+      b.cylinder('pool_water', it.x, 0.5, it.z, r - 0.18, 0.02, { segments: 32, caps: 'top' });
+      b.cylinder('statue_marble', it.x, 0.5, it.z, 0.32, 1.5, { segments: 14, rTop: 0.22 });
+      b.cylinder('statue_marble', it.x, 2.0, it.z, 1.1, 0.16, { segments: 24, rTop: 0.9 });
+      b.cylinder('pool_water', it.x, 2.14, it.z, 0.8, 0.02, { segments: 20, caps: 'top' });
+      b.cylinder('statue_marble', it.x, 2.16, it.z, 0.14, 0.7, { segments: 10 });
+      b.cylinder('statue_marble', it.x, 2.86, it.z, 0.45, 0.1, { segments: 16, rTop: 0.3 });
+      // falling water: thin sheets from the upper bowl down to the basin
+      for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+        b.quad('puddle_clear', it.x + c * 0.98, 0.52, it.z + s * 0.98, -s * 0.5, 0, c * 0.5, 0, 1.6, 0, { uv: 'unit' });
+      }
+    }
+  }
+}
+
+/** Floor support for the rest of the game: entities, objectives and the player's checkpoints. */
+function bldFloors(world, P) {
+  const B = bldPlan(world, P);
+  return {
+    count: B.F, storey: B.SH,
+    y: (f) => f * B.SH,
+    floorOf: (y) => Math.max(0, Math.min(B.F - 1, Math.floor((y + 0.6) / B.SH))),
+    slab: (x, z, f) => bldSlab(B, x, z, f),
+    dropTo(x, z, f) { while (f > 0 && !bldSlab(B, x, z, f)) f--; return f; },
+    slots: (f) => (B.slots[f] || []),
+    spots: (f) => (B.spots[f] || []),
+  };
+}
+
+// ------------------------------------------------------------------ stairwell
+// A stairwell level is the stairwell: the shaft itself is the level's stairshaft
+// goal (stage key atSpawn puts it round the spawn), and all the generator lays is
+// the dark concrete it stands on.
+function buildStairwellGround(world, l, b) {
+  ground(b, 'concrete_floor', l.x0, l.z0, l.x0 + CH, l.z0 + CH, 0, 4);
 }
 
 // ------------------------------------------------------------------ suburbs

@@ -10,7 +10,11 @@
 //     hatch) put the player back on their feet, the bad ones (jaws, grinder,
 //     whirlpool, drop) kill.
 //
-//   node tools/playtest/rides.mjs            pg07 (carousel), pg10 (escalators), pg04 (slides)
+//   * in a multi-storey building (mall, apartment block) every escalator or stair
+//     flight takes the player from its floor to the next one, and stepping off at
+//     the top lands them on the gallery of that floor, not in the atrium;
+//
+//   node tools/playtest/rides.mjs            pg07 (carousel), pg10 (escalators), pg04 (slides), level20 (mall)
 //   node tools/playtest/rides.mjs pg10       one level
 // ============================================================================
 import { bootGame } from './boot.mjs';
@@ -20,7 +24,7 @@ if (!b.game) { console.log('BOOT FAILED'); process.exit(1); }
 const { game, clock, LEVELS, input, problems } = b;
 
 const asked = process.argv.slice(2);
-const list = asked.length ? asked : ['pg07', 'pg10', 'pg04'];
+const list = asked.length ? asked : ['pg07', 'pg10', 'pg04', 'level20'];
 let bad = 0;
 
 function propsOf(type) {
@@ -44,6 +48,33 @@ for (const id of list) {
   game.entities.update = () => {};
 
   const world = game.world;
+  const B = world._bld;
+  if (B && B.climbs) {
+    for (const c of B.climbs) {
+      const y0 = c.f * B.SH, y1 = y0 + B.SH;
+      world.update(0, c.cx, c.zc);
+      pl.pos.set(B.A0 - 0.6, y0 + 0.05, c.zc); pl.vel.set(0, 0, 0); pl.yaw = -Math.PI / 2;
+      // walk east onto the bottom landing, then stand still and ride
+      input.keys = input.keys || {};
+      for (let i = 0; i < 60; i++) { pl.pos.x += 0.03; await clock.settle(1); }
+      let top = pl.pos.y;
+      for (let i = 0; i < 60 * 20 && pl.pos.y < y1 - 0.05; i++) { await clock.settle(1); top = Math.max(top, pl.pos.y); }
+      // step off sideways onto the gallery
+      const dz = c.north ? -1 : 1;
+      const offX = (c.top0 + c.top1) / 2;
+      pl.pos.x = offX;
+      for (let i = 0; i < 60; i++) { pl.pos.z += dz * 0.04; await clock.settle(1); }
+      const onGallery = Math.abs(pl.pos.y - y1) < 0.25 && (c.north ? pl.pos.z < B.A0 : pl.pos.z > B.A1);
+      const ok = top > y1 - 0.15 && onGallery;
+      console.log(`${ok ? 'ok  ' : 'FAIL'} ${id} floor ${c.f} -> ${c.f + 1}: rode up to ${top.toFixed(2)} m of ${y1.toFixed(2)} m, stepped off at y=${pl.pos.y.toFixed(2)} z=${pl.pos.z.toFixed(2)}`);
+      if (!ok) bad++;
+    }
+    for (const g of game.objectives.goals) {
+      if (g.type === 'note') continue;
+      const f = world.gen.floors.floorOf(g.y);
+      console.log(`     ${id} goal ${g.type.padEnd(12)} on floor ${f} at (${g.x.toFixed(1)}, ${g.y.toFixed(1)}, ${g.z.toFixed(1)})`);
+    }
+  }
   const slides = game.objectives.goals.filter((g) => g.type === 'slide');
   if (slides.length) {
     const g = slides[0];
@@ -63,8 +94,8 @@ for (const id of list) {
     }
   }
   const carousels = propsOf('carousel'), escalators = propsOf('escalator');
-  if (!carousels.length && !escalators.length && !slides.length) { console.log(`FAIL ${id}: no carousel or escalator was generated`); bad++; continue; }
-  if (!slides.length && !world.movers.size) { console.log(`FAIL ${id}: nothing is moving (no movers registered)`); bad++; continue; }
+  if (!carousels.length && !escalators.length && !slides.length && !B) { console.log(`FAIL ${id}: no carousel or escalator was generated`); bad++; continue; }
+  if (!slides.length && !B && !world.movers.size) { console.log(`FAIL ${id}: nothing is moving (no movers registered)`); bad++; continue; }
 
   const sp = lv.spawn || [16, 16];
   const near = (a) => a.slice().sort((p, q) => Math.hypot(p.x - sp[0], p.z - sp[1]) - Math.hypot(q.x - sp[0], q.z - sp[1])).slice(0, 2);
@@ -79,7 +110,7 @@ for (const id of list) {
     if (!moved) bad++;
   }
 
-  for (const p of near(escalators)) {
+  for (const p of B ? [] : near(escalators)) {
     if (p.opts.still) continue;
     const len = p.opts.len || 5.6, rise = p.opts.rise || 2.6;
     const c = Math.cos(p.rot), s = Math.sin(p.rot);
