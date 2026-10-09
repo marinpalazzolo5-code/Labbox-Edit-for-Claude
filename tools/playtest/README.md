@@ -31,7 +31,7 @@ node tools/levelcheck/check.mjs && node tools/playtest/menu.mjs && node tools/pl
 | `menu.mjs` | boot, the start screen, installing every bonus pack from the dock, the level grid of each pack (one card per level), entering a level from the menu and quitting back |
 | `play.mjs` | `game.enter()` for real — world generation, lighting bake, loot planning, goal placement, entities — then walks the objective chain: stand at each goal, use it, wait for the stage to finish, and report anything thrown in a frame, a timer or an await |
 | `stairs.mjs` | walks every stair shaft from the bottom landing to the door at the top, one short step at a time, and checks the player actually gains `flights x rise` metres |
-| `studios.mjs` | opens the two studios and the entity viewer, clicks every preset, and loads what they print back in (a level file has to register through `LabLevels.add`, an entity file has to evaluate against the game's entity code) |
+| `studios.mjs` | opens the two studios and the entity viewer, clicks every preset, and loads what they print back in (a level file has to register through `LabLevels.add`, an entity file has to evaluate against the game's entity code); in the level studio it also paints walls and floor on the map editor, sets the spawn, places / drags / removes a creature with pointer events, and checks the file carries `layout`, `spawn` and `placed`, that *Play preview* opens `index.html#preview=` with that exact file, and that the file reads back in unchanged |
 
 `play.mjs` cannot solve puzzles that need real input — keypad codes, valves in a
 colour order, "pick the safe slide", "pick the window that leads home". Those

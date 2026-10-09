@@ -163,6 +163,17 @@ export function installBrowser() {
     Object.defineProperty(el, 'lastElementChild', { get() { return this.children[this.children.length - 1] || null; } });
     Object.defineProperty(el, 'lastChild', { get() { return this.children[this.children.length - 1] || null; } });
     Object.defineProperty(el, 'children', { value: el.children, writable: true });
+    if (el.tagName === 'SELECT') {
+      // select.options: every <option>, including the ones inside an <optgroup>
+      Object.defineProperty(el, 'options', {
+        get() {
+          const out = [];
+          const walk = (n) => { for (const c of n.children || []) { if (c.tagName === 'OPTION') out.push(c); else walk(c); } };
+          walk(this);
+          return out;
+        },
+      });
+    }
     all.push(el);
     if (id) byId.set(id, el);
     return el;
