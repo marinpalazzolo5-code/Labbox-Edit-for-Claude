@@ -16,7 +16,7 @@
 // ============================================================================
 import { bootGame } from './boot.mjs';
 
-const PUZZLE = /code|in order|Pick the|window that leads/i;
+const PUZZLE = /code|digits|in order|Pick the|Choose|window that leads/i;
 
 const b = bootGame();
 if (!b.game) {
