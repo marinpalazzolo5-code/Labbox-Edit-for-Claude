@@ -18,7 +18,7 @@ LabLevels.add('corrupt', {
   passive: false,
   seed: 7943,
   description: 'Lockers crusted with moss, classrooms open to the sky. The gym floor ends in a drop into soft white cloud.',
-  intro: 'Ring the bell to unlock the main doors. Everything will hear it. The hall past the gym is gone. Every shortcut ends in the same cliff.',
+  intro: 'Ring the bell to unlock the main doors. Everything will hear it. The hall past the gym is gone. Every shortcut ends in the same cliff. The ceiling by the entrance has come down: up there, nothing follows you, and a roof hatch leads out.',
   spawn: [16, 16],
   fall: true,
   ambientLight: [0.0608, 0.0608, 0.0652],
@@ -38,6 +38,7 @@ LabLevels.add('corrupt', {
   gen: {
     type: 'lobby',
     params: {
+      ceilingWalk: true,
       height: 3,
       wallMat: 'drywall_blue',
       floorMat: 'vct_school',

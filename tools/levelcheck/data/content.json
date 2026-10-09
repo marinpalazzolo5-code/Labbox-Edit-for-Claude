@@ -17,48 +17,95 @@
   ]
  },
  "pg05": {
-  "description": "A narrow stairwell the colour of boiled sweets, climbing eight floors in a single shaft. Every flight turns back on itself, and the door at the top is the only way out.",
-  "intro": "One narrow stairwell between you and the top, eight flights of it. It turns back on itself on every landing. Keep moving.",
-  "genParams": {
-   "height": 3.0,
-   "density": [
-    0.34,
-    0.62
-   ],
-   "roomChance": 0.2,
-   "doorwayChance": 0.16
-  },
+  "description": "A narrow stairwell the colour of boiled sweets, eight floors in a single shaft. No rooms, no corridors: the stairs are the level, and something climbs them behind you.",
+  "intro": "You start at the bottom of the shaft. Eight flights to the door at the top. Something is coming up the stairs after you - keep moving.",
   "stagesKeep": 0,
   "stagesAdd": [
    {
-    "text": "Climb the shaft to the top",
+    "text": "Climb the stairwell",
+    "hint": "Keep moving: it gains on you while you stand still",
     "goal": "stairshaft",
     "flights": 8,
     "rise": 2.8,
+    "atSpawn": true,
     "dist": [
-     30,
-     46
+     0,
+     0
     ],
     "final": true
    }
-  ]
+  ],
+  "spawn": [
+   16,
+   16
+  ],
+  "gen": {
+   "type": "open",
+   "mode": "stairwell",
+   "params": {}
+  },
+  "follower": {
+   "type": "pg_attendant",
+   "delay": 9
+  },
+  "entities": [],
+  "rare": []
  },
  "pg10": {
-  "description": "Six storeys of mall atrium whose escalators all stop at the wrong floor. The only way up is the stairwell in the service core: one narrow shaft, six flights.",
-  "intro": "The escalators are stopping at the wrong floors. Take the stairwell: one shaft, six flights to the top of the atrium.",
+  "description": "Six storeys of mall round one atrium, and every escalator still runs - up. The service stairs on the sixth floor are the way on, into the mirror maze.",
+  "intro": "Ride the escalators up through the atrium. Wind the music box on the third floor, then find the service stairs on the sixth. They lead straight down into the next ride.",
   "stagesKeep": 0,
   "stagesAdd": [
    {
-    "text": "Take the stairwell to the sixth floor",
-    "goal": "stairshaft",
-    "flights": 6,
-    "rise": 3.0,
+    "text": "Ride the escalators to the third floor and switch the music back on",
+    "hint": "Every escalator still runs. They only go up.",
+    "goal": "musicbox",
+    "floor": 2,
     "dist": [
-     30,
-     48
+     10,
+     30
+    ]
+   },
+   {
+    "text": "Keep going up: the service stairs are on the sixth floor",
+    "goal": "door_stairs",
+    "floor": 5,
+    "dist": [
+     10,
+     40
     ],
-    "final": true
+    "from": "prev",
+    "final": true,
+    "next": "pg11"
    }
+  ],
+  "spawn": [
+   16.5,
+   30
+  ],
+  "gen": {
+   "type": "open",
+   "mode": "mall",
+   "params": {
+    "floors": 6,
+    "fountain": true
+   }
+  },
+  "entities": [
+   [
+    "mannequin",
+    3
+   ],
+   [
+    "partygoer",
+    1
+   ]
+  ],
+  "rare": [
+   [
+    "pg_attendant",
+    0.4
+   ]
   ]
  },
  "pg15": {
@@ -80,48 +127,42 @@
   ]
  },
  "pg16": {
-  "description": "One great stairwell in candy-cane stripes: twelve flights in a single narrow shaft, turning back on itself all the way to the top. There is nothing else in the tower.",
-  "intro": "One narrow shaft, twelve flights, and things that join you partway up. Do not stop to count the floors.",
-  "genParams": {
-   "density": [
-    0.32,
-    0.6
-   ],
-   "roomChance": 0.18,
-   "doorwayChance": 0.16
-  },
-  "entities": [
-   [
-    "partygoer",
-    2
-   ],
-   [
-    "pg_attendant",
-    2
-   ],
-   [
-    "hound",
-    1
-   ],
-   [
-    "pg_mascot",
-    1
-   ]
-  ],
+  "description": "One great stairwell in candy-cane stripes: twelve flights in a single narrow shaft, and a door on the sixth landing for anyone who cannot face the rest.",
+  "intro": "Twelve flights, or six and the door on floor 7. The mascot is climbing too, a few seconds behind you. Do not stop to count the floors.",
+  "entities": [],
   "stagesKeep": 0,
   "stagesAdd": [
    {
-    "text": "Climb the great stairwell to the top",
+    "text": "Climb the stairwell",
+    "hint": "Keep moving: it gains on you while you stand still",
     "goal": "stairshaft",
     "flights": 12,
     "rise": 2.8,
+    "exits": [
+     6
+    ],
+    "atSpawn": true,
     "dist": [
-     30,
-     46
+     0,
+     0
     ],
     "final": true
    }
-  ]
+  ],
+  "spawn": [
+   16,
+   16
+  ],
+  "gen": {
+   "type": "open",
+   "mode": "stairwell",
+   "params": {}
+  },
+  "follower": {
+   "type": "pg_mascot",
+   "delay": 8
+  },
+  "rare": []
  },
  "pg21": {
   "intro": "Find the two fun house keys in the glass rooms, then climb the stairwell out. The glass is thinner than it looks.",
@@ -159,42 +200,118 @@
   ]
  },
  "pg27": {
-  "description": "A stairwell tower that goes on past any building: one narrow shaft, sixteen flights, and no doors but the one at the top.",
-  "intro": "Sixteen flights in one narrow shaft, all the way to the top. Do not look down. Do not look up either.",
-  "genParams": {
-   "density": [
-    0.32,
-    0.6
-   ],
-   "roomChance": 0.18
+  "description": "A stairwell tower that goes on past any building: sixteen flights in one narrow shaft. Two landings have a door; the ringmaster follows every step you take.",
+  "intro": "Sixteen flights in one narrow shaft. There are doors on the 9th and 13th floors if you cannot make the top. Do not look down. Something is following you up.",
+  "entities": [],
+  "stagesKeep": 0,
+  "stagesAdd": [
+   {
+    "text": "Climb the stairwell",
+    "hint": "Keep moving: it gains on you while you stand still",
+    "goal": "stairshaft",
+    "flights": 16,
+    "rise": 2.8,
+    "exits": [
+     8,
+     12
+    ],
+    "atSpawn": true,
+    "dist": [
+     0,
+     0
+    ],
+    "final": true
+   }
+  ],
+  "spawn": [
+   16,
+   16
+  ],
+  "gen": {
+   "type": "open",
+   "mode": "stairwell",
+   "params": {}
+  },
+  "follower": {
+   "type": "pg_ringmaster",
+   "delay": 10
+  },
+  "rare": []
+ },
+ "pg23": {
+  "description": "A five-storey block of flats round a light well, the lift lobby on every floor, and each lift with a bright little jingle.",
+  "intro": "Call the lifts in the lobby. Then climb the stairs across the light well to the fifth floor, where the freight elevator takes you down to the log flume.",
+  "spawn": [
+   11,
+   24
+  ],
+  "gen": {
+   "type": "open",
+   "mode": "apartment",
+   "params": {
+    "floors": 5,
+    "fountain": false
+   }
   },
   "entities": [
    [
-    "partygoer",
+    "pg_attendant",
     2
    ],
    [
-    "pg_attendant",
+    "partygoer",
     1
-   ],
+   ]
+  ],
+  "rare": [
    [
-    "pg_lifeguard",
-    1
+    "pg_mascot",
+    0.4
    ]
   ],
   "stagesKeep": 0,
   "stagesAdd": [
    {
-    "text": "Climb the shaft to the top",
-    "goal": "stairshaft",
-    "flights": 16,
-    "rise": 2.8,
+    "text": "Call the lifts in the lobby",
+    "goal": "elevator",
+    "count": 2,
+    "floor": 0,
     "dist": [
-     30,
-     48
+     10,
+     30
+    ]
+   },
+   {
+    "text": "Climb to the top floor and take the freight elevator down",
+    "hint": "The stairs cross the light well on every floor.",
+    "goal": "elevator",
+    "floor": 4,
+    "dist": [
+     10,
+     30
     ],
-    "final": true
+    "from": "prev",
+    "final": true,
+    "next": "pg24"
    }
   ]
+ },
+ "cor01": {
+  "intro": "Nothing lives here. Only the hum, and the feeling of being watched. Find a way out. The roof has holes now. Water comes through them in streams, and something has grown in the carpet. Just past the spawn the ceiling has fallen in over a heap of rubble: climb it, and the top of the ceiling will hold you. Somewhere up there is a roof hatch.",
+  "genParams": {
+   "ceilingWalk": true
+  }
+ },
+ "cor06": {
+  "intro": "The security door needs a keycard. Someone left it in a desk drawer. There is no ceiling past the third bay. Take the long way round the edge. Or climb the collapse by the spawn and walk across the top of the ceiling, over everything, to the roof hatch.",
+  "genParams": {
+   "ceilingWalk": true
+  }
+ },
+ "cor23": {
+  "intro": "Ring the bell to unlock the main doors. Everything will hear it. The hall past the gym is gone. Every shortcut ends in the same cliff. The ceiling by the entrance has come down: up there, nothing follows you, and a roof hatch leads out.",
+  "genParams": {
+   "ceilingWalk": true
+  }
  }
 }

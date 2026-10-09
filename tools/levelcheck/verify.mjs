@@ -123,17 +123,23 @@ function eq(a, b, where) {
   if (a !== b && !(allow(where) && !a && (b === undefined || (Array.isArray(b) && !b.length)))) diffs.push(`${where}: ${JSON.stringify(a)} != ${JSON.stringify(b)}`);
 }
 
-if (LEVELS.length !== before.length) diffs.push(`LEVELS.length ${LEVELS.length} != ${before.length}`);
-for (let i = 0; i < Math.min(LEVELS.length, before.length); i++) {
-  const after = JSON.parse(JSON.stringify({ ...LEVELS[i], gen: LEVELS[i].gen(), surface: LEVELS[i].surface ? '<fn>' : undefined }, (k, v) => (typeof v === 'function' ? '<fn>' : v)));
-  eq(norm(before[i]), norm(after), before[i].id);
+// levels are matched by id: a pack added since the snapshot (Hell) only adds levels
+const byId = new Map(LEVELS.map((l) => [l.id, l]));
+const added = LEVELS.filter((l) => !before.some((b) => b.id === l.id)).map((l) => l.id);
+for (const b of before) {
+  const l = byId.get(b.id);
+  if (!l) { diffs.push(`${b.id}: missing from LEVELS`); continue; }
+  const after = JSON.parse(JSON.stringify({ ...l, gen: l.gen(), surface: l.surface ? '<fn>' : undefined }, (k, v) => (typeof v === 'function' ? '<fn>' : v)));
+  eq(norm(b), norm(after), b.id);
 }
 const afterPacks = JSON.parse(JSON.stringify(packsMod.PACKS));
-eq(beforePacks, afterPacks, 'PACKS');
+const newPacks = afterPacks.filter((p) => !beforePacks.some((q) => q.id === p.id)).map((p) => p.id);
+eq(beforePacks, afterPacks.filter((p) => beforePacks.some((q) => q.id === p.id)), 'PACKS');
 
 console.log('level files loaded:', levelFiles, '/', packs.reduce((a, p) => a + (p.files || []).length, 0));
 console.log('levels in LEVELS :', LEVELS.length, 'snapshot:', before.length);
 console.log('packs            :', afterPacks.map((p) => p.id).join(','));
+if (added.length) console.log('new levels       :', added.join(', '), newPacks.length ? '(new pack ' + newPacks.join(', ') + ')' : '');
 console.log('tracks           :', JSON.stringify(LEVELS.reduce((a, l) => (a[l.track] = (a[l.track] || 0) + 1, a), {})));
 if (loaded.length) console.log('file problems:\n  ' + loaded.join('\n  '));
 if (skipped.length) console.log('intended content changes ignored:', new Set(skipped.map((s2) => s2.split('.').slice(0, 2).join('.'))).size, 'paths in', new Set(skipped.map((s2) => s2.split('.')[0])).size, 'levels');

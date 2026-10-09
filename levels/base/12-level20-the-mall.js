@@ -2,9 +2,10 @@
 // Level 8.2 - The Mall  (id: level20, Base campaign)
 // Shuttered storefronts, planters and a fountain that stopped long ago.
 //
-// Scene: 18 generator settings, 4 entity groups, 2 rare spawns, loot keys 10/water 5/batteries 3
-//    1. Shut off the alarm panels  [breaker x2]
-//    2. Leave through the mall exit  [door_shutter (final)]
+// Scene: a four-storey mall round an atrium, 4 entity groups, 2 rare spawns, loot keys 10/water 5/batteries 3
+//    1. Ride the escalators up, shut off the alarm panels  [breaker x2, floor 3]
+//    2. Take the security key  [artifact, floor 2]
+//    3. Go back down and leave  [door_shutter (final), floor 0]
 //
 // One level per file: change anything here and reload the game. Field list:
 // levels/README.md  -  build levels without code: other/level-studio.html
@@ -15,48 +16,43 @@ LabLevels.add('base', {
   subtitle: 'The Mall',
   cls: 'Class 2',
   seed: 3021,
-  description: 'Shuttered storefronts, planters and a fountain that stopped long ago.',
-  intro: 'Shut off the alarm panels, then leave through the mall exit.',
-  spawn: [16, 16],
-  ambientLight: [0.03, 0.029, 0.026],
+  description: 'Four floors of empty shops round an atrium. The escalators still run; the fountain never stopped.',
+  intro: 'The alarm panels are on the top floor. Ride up, shut them off, find the key, and come back down to the exit.',
+  spawn: [16.5, 30],
+  ambientLight: [0.035, 0.034, 0.032],
   bounce: 0.36,
   lightRange: 22,
-  fog: { color: 0x1f1d19, density: 0.028 },
+  fog: { color: 0x1f1d19, density: 0.02 },
   tuning: { grimeScale: 0.9, wetScale: 0.6 },
   gen: {
-    type: 'lobby',
+    type: 'open',
+    mode: 'mall',
     params: {
-      height: 4.2,
-      wallMat: 'stucco',
-      floorMat: 'terrazzo',
-      ceilMat: 'ceiling_white',
-      fixtureMat: 'fixture_troffer',
-      frameMat: 'metal_white',
-      fixtureColor: [1, 0.96, 0.88],
-      fixtureIntensity: 4.2,
-      density: [0.08, 0.3],
-      roomChance: 0.4,
-      pillarChance: 0.6,
-      deadChance: 0.06,
-      flickerChance: 0.04,
-      strobeChance: 0.01,
-      dyingChance: 0.02,
-      darkZones: 0.2,
-      featureWeights: { pool: 0.8, glass: 1, collapse: 0.4, exit: 0.8, blackout: 0.6 },
-      props: 'mall',
+      floors: 4,
+      fountain: true,
     },
   },
   stages: [
     {
-      text: 'Shut off the alarm panels',
+      text: 'Ride the escalators to the top floor and shut off the alarm panels',
+      hint: 'Fourth floor. The escalators still run.',
       goal: 'breaker',
       count: 2,
-      dist: [30, 55],
+      floor: 3,
+      dist: [10, 30],
     },
     {
-      text: 'Leave through the mall exit',
+      text: 'Take the security key from the manager\'s office',
+      goal: 'artifact',
+      floor: 2,
+      dist: [10, 30],
+      from: 'prev',
+    },
+    {
+      text: 'Go back down and leave through the mall exit',
       goal: 'door_shutter',
-      dist: [50, 70],
+      floor: 0,
+      dist: [20, 40],
       final: true,
     },
   ],

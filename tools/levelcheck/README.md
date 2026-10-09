@@ -13,20 +13,25 @@ node tools/levelcheck/verify.mjs             # every field still matches the ori
 ```
 
 `check.mjs` is the one to run before you commit a level. It reads the list of valid
-materials, furniture sets, goals, entity ids and generator settings out of
+materials, furniture sets, goals, generator modes and settings out of
 `other/level-studio.html`, so if you add something to the game, add it to the studio
-and the checker picks it up.
+and the checker picks it up. The creature ids come from `entities/loader.js` and the
+files it loads, together with the folder (pack) each creature lives in: a level may use
+creatures from `entities/base/` and from its own pack's folder only (see
+`entities/README.md`). It also checks the painted map (`gen.params.layout`), `placed`
+creatures and the newer stage keys (`floor`, `checkpoint`, `endings`, `next`).
 
 ## What each tool does
 
 | file | what it is |
 | --- | --- |
-| `check.mjs` | whole-tree check: pack lists, duplicate ids, generator settings, materials, props, goals, stage keys, entity ids, loot, cut shapes |
+| `check.mjs` | whole-tree check: pack lists, duplicate ids, generator settings, materials, props, goals, stage keys, entity ids and the pack rule, painted layouts, placed creatures, loot, cut shapes |
 | `cutcheck.mjs` | draws the cuts of a pack's levels, prints how much of the play area is void and how close the nearest hole is to the spawn |
 | `verify.mjs` | loads `levels/` the way the browser does and compares every level and pack field with the snapshot of the original single-file game |
 | `snapshot.mjs` | rebuilds that snapshot from `index.html` at commit `f3ca628` (or `$LB_BEFORE`) |
 | `regen.mjs` | **rewrites** `levels/corrupt/` and `levels/playground/` from `data/*.json` and the original level data. Hand edits in those two folders are lost |
 | `bundle.mjs` | splits `index.html` into its modules so the generator code can run in Node |
+| `studiodata.mjs` | refreshes the level studio's copy of the levels (the *Copy the look of* list, the taken ids, each pack's file list) from `levels/` - run it after adding or changing a level |
 | `levelio.mjs` | reads one level file (evaluate it with a registry stub) and writes it back in the canonical format |
 | `cuts.mjs` | the cut maths, lifted out of the game, plus `cutSurvey()` for tools |
 | `data/` | the generator's inputs: `cuts.json`, `glitch.json`, `content.json`, `text.json`, the golden snapshot, and `intended.json` (the paths `verify.mjs` should ignore because they were changed on purpose) |

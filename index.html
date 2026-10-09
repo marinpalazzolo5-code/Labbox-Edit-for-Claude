@@ -6965,6 +6965,34 @@ __e['save'] = save;
 <script src="entities/loader.js"></script>
 <script src="levels/loader.js"></script>
 <script>
+// Level studio preview: other/level-studio.html opens index.html#preview=<{ pack, source }>
+// (or leaves the same JSON in localStorage 'labbox.studio.preview' and opens #preview).
+// The level file is run through LabLevels.add like any other - replacing a level with
+// the same id - and the game goes straight into it once it has booted (see boot()).
+(function () {
+  var m = /^#preview(?:=(.*))?$/.exec(location.hash || '');
+  if (!m || !window.LabLevels) return;
+  try {
+    var raw = m[1] ? decodeURIComponent(m[1]) : null;
+    if (!raw) { try { raw = localStorage.getItem('labbox.studio.preview'); } catch (e) { raw = null; } }
+    if (!raw) throw new Error('nothing to preview - press Play preview in the level studio again');
+    var data = JSON.parse(raw), LL = window.LabLevels, got = null;
+    var realAdd = LL.add;
+    LL.add = function (folder, def) {
+      if (def && def.id) for (var f in LL.levels) LL.levels[f] = LL.levels[f].filter(function (d) { return d.id !== def.id; });
+      got = realAdd.call(LL, data.pack || folder, def);
+      return got;
+    };
+    try { new Function(String(data.source))(); } finally { LL.add = realAdd; }
+    if (!got || !got.id) throw new Error('the level file did not call LabLevels.add with a level that has an id');
+    window.__previewLevel = got.id;
+  } catch (e) {
+    console.error('[preview] ' + (e && e.message ? e.message : e));
+    window.__previewError = String(e && e.message ? e.message : e);
+  }
+})();
+</script>
+<script>
 (function () {
 'use strict';
 const __mod = window.__mod;
@@ -7567,6 +7595,8 @@ class World {
     this.onChunkBuilt = null;
     this.onChunkDisposed = null;
     this.extraFixtures = []; // fixtures not tied to chunks (transition modules)
+    this.movers = new Set();  // moving set pieces (carousels, escalator steps): { update(dt, t) }
+    this.moverT = 0;
   }
 
   // ------------------------------------------------------------ level load
@@ -7582,6 +7612,7 @@ class World {
     this.bucketSize = this.S;
     this.state = new Map();
     this.epoch = new Map();
+    this._bld = null;                     // a building plan belongs to one level (see open.js bldPlan)
     if (gen.init) gen.init(this, level);
     this.updateRenderRadius();
   }
@@ -7599,6 +7630,7 @@ class World {
     this.layouts.clear();
     this.buildQueue.length = 0;
     this.dynamicColliders.clear();
+    this.movers.clear();
     if (this.gen && this.gen.dispose) this.gen.dispose(this);
     for (const fx of this.extraFixtures) this.lights.release(fx);
     this.extraFixtures = [];
@@ -7928,6 +7960,8 @@ class World {
 
   update(dt, px, pz) {
     if (!this.gen) return;
+    this.moverT += dt;
+    for (const mv of this.movers) mv.update(dt, this.moverT);
     const cx = this.chunkOf(px), cz = this.chunkOf(pz);
     const R = this.renderRadius;
     // enqueue missing chunks
@@ -8339,11 +8373,51 @@ class EntityManager {
     for (const [type, chance] of this.level.rare || []) {
       if (this.rng.next() < chance) this.spawn(type, fromSpawn ? sp : null, 30, 60);
     }
+    // creatures the level's author put in a fixed place (the studio's map: placed: [[id, x, z], ...])
+    for (const [type, x, z] of this.level.placed || []) if (ENTITY_DEFS[type]) this.make(type, x, z);
+    // something that follows the player's own footsteps (follower: { type, delay })
+    const fo = this.level.follower;
+    if (fo && ENTITY_DEFS[fo.type || 'chase']) {
+      const e = this.make(fo.type || 'chase', sp[0], sp[1]);
+      e.follow = { delay: fo.delay || 8, lag: fo.delay || 8, dmg: fo.damage ?? 20, hitT: 0 };
+      e.dist = 99;
+      e.root.visible = false;
+      this.trail = [];
+    }
+  }
+
+  /**
+   * A follower walks exactly where the player walked, a few seconds behind: up every
+   * flight of a stairwell, round every landing. Keep moving and it stays behind; stand
+   * still and it closes the gap. Nothing about it is clever, which is the point.
+   */
+  updateFollower(e, dt) {
+    const F = e.follow, pl = this.player, trail = this.trail || (this.trail = []);
+    const moving = Math.hypot(pl.vel.x, pl.vel.z) > 0.8 || Math.abs(pl.vel.y) > 0.5 || this.game.rideLock;
+    F.lag = Math.max(0.9, Math.min(F.delay, F.lag + (moving ? 0.2 : -0.55) * dt));
+    const at = this.time - F.lag;
+    let p = null;
+    for (let i = trail.length - 1; i >= 0; i--) if (trail[i].t <= at) { p = trail[i]; break; }
+    if (!p) { e.root.visible = false; return; }
+    const dx = p.x - e.pos.x, dz = p.z - e.pos.z, step = Math.hypot(dx, dz);
+    if (step > 0.01) e.yaw = Math.atan2(dx, dz);
+    e.pos.set(p.x, 0, p.z); e.fy = p.y;
+    e.root.visible = true;
+    e.root.position.set(p.x, p.y, p.z);
+    e.root.rotation.y = e.yaw;
+    e.st.speed = Math.min(6, step / Math.max(dt, 1e-3));
+    e.model.animate(e.st, dt);
+    const d = Math.hypot(pl.pos.x - p.x, pl.pos.z - p.z, (pl.pos.y - p.y) * 1.5);
+    e.dist = d;
+    F.hitT -= dt;
+    if (d < 1.1 && F.hitT <= 0 && !this.game.rideLock) { F.hitT = 1.2; pl.damage(F.dmg, e); this.game.hud.flash('It caught up with you.', 1200); }
+    if (!F.warned && d < 6) { F.warned = true; this.game.hud.toast('Something is on the stairs behind you.', 2200); }
   }
 
   clear() {
     for (const e of this.list) this.dispose(e);
     this.list = [];
+    this.trail = null;
     this.pendingChase = 0;
     this.fx.clear();
     this.fogBoost = this.desat = this.whisper = this.rumble = this.aberr = 0;
@@ -8390,6 +8464,25 @@ class EntityManager {
     return e;
   }
 
+  /**
+   * Which floor an entity is on, in a multi-storey building. It walks the ground
+   * plan (the walls are the same on every floor); where there is no floor under it
+   * (the atrium) it drops to the floor below, and when it has been out of sight on
+   * another floor for a while it turns up on the player's - it took the stairs.
+   * Returns how many floors lie between it and the player.
+   */
+  floorOf(e, floors, pf, dt) {
+    if (e.floor === undefined) e.floor = floors.climb === false ? 0 : pf;
+    if (!floors.slab(e.pos.x, e.pos.z, e.floor)) e.floor = floors.dropTo(e.pos.x, e.pos.z, e.floor);
+    if (e.floor !== pf) {
+      e.floorT = (e.floorT || 0) + dt;
+      const pl = this.player;
+      if (floors.climb !== false && e.floorT > 7 && floors.slab(e.pos.x, e.pos.z, pf) && !this.world.visible(pl.pos.x, pl.eyeY, pl.pos.z, e.pos.x, floors.y(pf) + 1.4, e.pos.z)) { e.floor = pf; e.floorT = 0; }
+    } else e.floorT = 0;
+    e.fy = floors.y(e.floor);
+    return Math.abs(e.floor - pf);
+  }
+
   spawn(type, near = null, dmin = 16, dmax = 30, extra = false) {
     const def = ENTITY_DEFS[type];
     if (def.static) return this.spawnStatic(type, near, dmin, dmax);
@@ -8397,7 +8490,9 @@ class EntityManager {
     const P = this.player.pos;
     const cx = near ? near[0] : P.x, cz = near ? near[1] : P.z;
     const eye = this.player.eyeY;
+    const bounds = this.world.gen && this.world.gen.bounds;
     const spot = this.nav.randomSpot(cx, cz, dmin, dmax, this.rng, (x, z) => {
+      if (bounds && (x < bounds[0] || z < bounds[1] || x > bounds[2] || z > bounds[3])) return false;
       if (Math.hypot(x - P.x, z - P.z) < 12) return false;
       if (this.world.visible(P.x, eye, P.z, x, 1.4, z) && Math.hypot(x - P.x, z - P.z) < 30) return false;
       if (def.darkOnly && this.lum(x, z) > DARK_LUM) return false;
@@ -8532,10 +8627,20 @@ class EntityManager {
     const cosFov = Math.cos(THREE.MathUtils.degToRad(cam.fov * 0.62 * Math.max(1, cam.aspect)));
     const S = this.diff.speed;
     const ceil = this.ceiling();
+    // a multi-storey level: everything lives on a floor, and only what shares the
+    // player's floor is close to them (see floorOf)
+    const floors = this.world.gen && this.world.gen.floors, pf = floors ? floors.floorOf(P.y) : 0;
+    if (this.trail) {
+      const tr = this.trail, last = tr[tr.length - 1];
+      if (!last || this.time - last.t > 0.05) tr.push({ t: this.time, x: P.x, y: P.y, z: P.z });
+      while (tr.length && this.time - tr[0].t > 40) tr.shift();
+    }
     for (const e of this.list) {
       const def = e.def;
+      if (e.follow) { this.updateFollower(e, dt); threat = Math.max(threat, Math.max(0, 1 - e.dist / 12)); continue; }
       const dx = P.x - e.pos.x, dz = P.z - e.pos.z;
-      const d = Math.hypot(dx, dz);
+      let d = Math.hypot(dx, dz);
+      if (floors) d += this.floorOf(e, floors, pf, dt) * 30;
       e.dist = d;
 
       // ---- hidden (Smilers waiting for darkness, Whisperers repositioning)
@@ -8656,7 +8761,7 @@ class EntityManager {
       e.root.visible = show;
       if (e.model.worldSpace) { e.root.position.set(0, 0, 0); e.root.rotation.y = 0; }
       else {
-        const fl = def.fly ? 0 : this.world.groundAt(e.pos.x, e.pos.z);
+        const fl = (def.fly ? 0 : this.world.groundAt(e.pos.x, e.pos.z)) + (e.fy || 0);
         e.root.position.set(e.pos.x, e.pos.y + fl, e.pos.z);
         e.root.rotation.y = e.yaw;
       }
@@ -8727,7 +8832,7 @@ class EntityManager {
     const len = Math.hypot(ex, ey, ez) || 1;
     const dot = (ex * camFwd.x + ey * camFwd.y + ez * camFwd.z) / len;
     if (dot < cosFov - 0.05) return 0;
-    if (!this.world.visible(pl.pos.x, pl.eyeY, pl.pos.z, e.pos.x, 1.3, e.pos.z)) return 0;
+    if (!this.world.visible(pl.pos.x, pl.eyeY, pl.pos.z, e.pos.x, (e.fy || 0) + 1.3, e.pos.z)) return 0;
     return dot;
   }
 
@@ -8770,7 +8875,7 @@ class EntityManager {
     let sees = false;
     if (d < R) {
       const facing = Math.cos(Math.atan2(P.x - e.pos.x, P.z - e.pos.z) - e.yaw) > -0.2 || d < R * 0.45 || e.state === 'chase';
-      if (facing && (def.xray || this.world.visible(e.pos.x, Math.min(e.model.eyeY, 2.4), e.pos.z, P.x, pl.eyeY, P.z))) sees = true;
+      if (facing && (def.xray || this.world.visible(e.pos.x, (e.fy || 0) + Math.min(e.model.eyeY, 2.4), e.pos.z, P.x, pl.eyeY, P.z))) sees = true;
       if (d < R * 0.4) sees = true; // heard
     }
     if (def.think) { def.think(this, e, d, sees, noise); return; }
@@ -8779,7 +8884,7 @@ class EntityManager {
     if (def.puppet) {
       if (!this.game.night) { e.state = 'wander'; e.path = null; e.idle = 1; return; }
       const moving = (pl.walkSpeed || 0) > 0.35;
-      const seesP = moving && d < def.detect * this.diff.detect && this.world.visible(e.pos.x, e.model.eyeY, e.pos.z, P.x, pl.eyeY, P.z);
+      const seesP = moving && d < def.detect * this.diff.detect && this.world.visible(e.pos.x, (e.fy || 0) + e.model.eyeY, e.pos.z, P.x, pl.eyeY, P.z);
       if (seesP || (moving && d < 3)) { if (e.state !== 'chase') this.alert(e); e.lost = 0; e.lastSeen = [P.x, P.z]; }
       else if (e.state === 'chase') { e.lost += 0.2; if (e.lost > (moving ? def.memory : 1.2)) { e.state = 'wander'; e.path = null; } }
       if (e.state === 'chase') this.route(e, P.x, P.z);
@@ -8973,7 +9078,7 @@ class EntityManager {
       e.attackT += dt;
       if (prev < 0.36 && e.attackT >= 0.36 && !(e.observed && def.statue)) {
         const pl = this.player;
-        const los = def.xray || def.duller || this.world.visible(e.pos.x, 1.2, e.pos.z, pl.pos.x, pl.eyeY - 0.3, pl.pos.z);
+        const los = def.xray || def.duller || this.world.visible(e.pos.x, (e.fy || 0) + 1.2, e.pos.z, pl.pos.x, pl.eyeY - 0.3, pl.pos.z);
         if (d < def.reach + 0.55 && los) {
           pl.damage(def.dmg * (e.dmgMul || 1), e);
           this.game.audio.entity(e.type, 'hit', e.pos, pl);
@@ -10318,8 +10423,16 @@ const { makeCollider: makeCollider, C: C } = __mod['src/world/collision.js'];
 const { EDGE: EDGE } = __mod['src/world/world.js'];
 const { CONTAINERS: CONTAINERS } = __mod['src/world/containers.js'];
 const { hash32: hash32 } = __mod['src/core/rng.js'];
+const { GeometryBuilder: GeometryBuilder } = __mod['src/world/builder.js'];
+const { FLICKER: FLICKER } = __mod['src/world/lights.js'];
 // Static prop library. Props are merged into chunk geometry (so they receive
 // baked light and cost no extra draw calls) and register colliders.
+//
+// A prop can also have moving parts: `dynamic(world, l, ctx, p, m, rng)` builds
+// them with addMover() into their own little meshes (still light-baked, at the
+// pose they were built in) that the world turns or slides every frame. A
+// collider can carry what stands on it - give it a 7th entry: 'spin' (turns with
+// the prop, def.spin rad/s) or 'belt' (an escalator step, moves toward local +z).
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -10916,41 +11029,146 @@ const PROPS = {
     },
   },
   carousel: {
-    size: [6.4, 6.4], colliders: [[-3.2, 0, -3.2, 3.2, 0.34, 3.2], [-0.34, 0.34, -0.34, 0.34, 3.3, 0.34]],
+    // a working carousel: the plinth stays put, everything above it turns, and the
+    // horses ride up and down their poles. Stand on the deck and it carries you round.
+    size: [6.4, 6.4], spin: 0.42,
+    colliders: [
+      [-3.25, 0, -3.25, 3.25, 0.14, 3.25],
+      [-3.05, 0.14, -1.3, 3.05, 0.36, 1.3, 'spin'], [-1.3, 0.14, -3.05, 1.3, 0.36, 3.05, 'spin'], [-2.25, 0.14, -2.25, 2.25, 0.36, 2.25, 'spin'],
+      [-0.5, 0.36, -0.5, 0.5, 3.3, 0.5],
+    ],
+    light: { y: 3.0, color: [1.0, 0.78, 0.5], intensity: 1.8, range: 12 },
     build(b, m, rng) {
+      // the plinth: a marble drum with a brass kick plate and a ring of floor lamps
+      cyl(b, 'marble_floor', m, 0, 0, 0, 3.32, 0.14, 32, { caps: 'top' });
+      cyl(b, 'brass', m, 0, 0.0, 0, 3.34, 0.05, 32, { caps: false });
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2, x = Math.cos(a) * 3.22, z = Math.sin(a) * 3.22;
+        bx(b, i % 2 ? 'fixture_bulb' : 'fixture_red', m, x - 0.04, 0.14, z - 0.04, x + 0.04, 0.18, z + 0.04, 63, { uv: 'unit' });
+      }
+      void rng;
+    },
+    dynamic(world, l, ctx, p, m, rng) {
       const trim = rng.pick(['brass', 'gold']);
-      cyl(b, 'marble_floor', m, 0, 0.02, 0, 3.1, 0.3, 24, { caps: 'bottom' });
-      cyl(b, 'terrazzo', m, 0, 0.3, 0, 3.02, 0.04, 24, { caps: false });
-      cyl(b, trim, m, 0, 3.1, 0, 3.24, 0.12, 24, { caps: false });
-      cyl(b, trim, m, 0, 0.34, 0, 3.24, 0.1, 24, { caps: false });
-      cyl(b, trim, m, 0, 3.22, 0, 3.24, 0.16, 24);
-      // the canopy: a scalloped cone, striped, with a ring of bulbs under the fascia
-      for (const [k, r0, r1] of [['art_a', 3.24, 2.5], ['art_b', 2.5, 1.7], ['art_c', 1.7, 0.9], ['art_d', 0.9, 0.34]]) {
-        cyl(b, k, m, 0, 3.38, 0, r0, 0.02, 24, { rTop: r1, caps: false });
-      }
-      cyl(b, trim, m, 0, 3.38, 0, 0.5, 0.24, 12);
-      sphereAt(b, trim, m, 0, 3.72, 0, 0.2);
-      for (let i = 0; i < 24; i++) {
-        const a = (i / 24) * Math.PI * 2;
-        bx(b, i % 2 ? 'fixture_bulb' : 'fixture_red', m, Math.cos(a) * 3.16 - 0.09, 3.16, Math.sin(a) * 3.16 - 0.09, Math.cos(a) * 3.16 + 0.09, 3.28, Math.sin(a) * 3.16 + 0.09, 63, { uv: 'unit' });
-      }
-      cyl(b, trim, m, 0, 0.34, 0, 0.22, 2.9, 12);
-      cyl(b, 'chrome', m, 0, 3.0, 0, 0.3, 0.14, 12);
-      // six horses on brass poles, all of them caught mid-stride
-      const hide = rng.pick(['fabric_white', 'fabric_brown', 'plastic_white']);
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * Math.PI * 2 + 0.26, cx = Math.cos(a) * 2.1, cz = Math.sin(a) * 2.1;
-        cyl(b, 'brass', m, cx, 0.34, cz, 0.035, 2.8, 8);
-        const hm = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(cx, 1.5, cz).multiply(new THREE.Matrix4().makeRotationY(-a)));
-        bx(b, hide, hm, -0.56, 0.02, -0.18, 0.5, 0.42, 0.18);
-        bx(b, hide, hm, 0.34, 0.24, -0.14, 0.72, 0.5, 0.14);
-        bx(b, hide, hm, 0.62, 0.36, -0.1, 0.84, 0.58, 0.1);
-        bx(b, 'velvet', hm, -0.3, 0.42, -0.2, 0.12, 0.5, 0.2);
-        for (const [lx, lz, ph] of [[-0.42, -0.16, -1], [-0.42, 0.16, 1], [0.4, -0.16, 1], [0.4, 0.16, -1]]) {
-          tube(b, hide, hm, [lx, 0.04, lz], [lx + ph * 0.16, -0.62, lz + ph * 0.1], 0.055, 6);
+      const hides = ['fabric_white', 'plastic_white', 'porcelain', 'fabric_brown', 'statue_marble'];
+      const saddles = ['velvet', 'gallery_red', 'gallery_green', 'plastic_blue'];
+      const panels = ['art_a', 'art_b', 'art_c', 'art_d'];
+      const N = 8, R = 2.25;
+      const body = (b) => {
+        // the deck, its edge and the centre column of mirrors and painted panels
+        cyl(b, 'wood_floor', m, 0, 0.14, 0, 3.1, 0.2, 32);
+        cyl(b, trim, m, 0, 0.14, 0, 3.14, 0.22, 32, { caps: false });
+        cyl(b, 'terrazzo', m, 0, 0.345, 0, 0.75, 0.02, 16);
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2 + Math.PI / 8, c = Math.cos(a), s = Math.sin(a);
+          const pm = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(c * 0.5, 0, s * 0.5).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2 - a)));
+          bx(b, 'metal_white', pm, -0.21, 0.36, -0.03, 0.21, 2.95, 0.0);
+          bx(b, i % 2 ? 'mirror' : panels[i % 4], pm, -0.17, 0.95, 0.0, 0.17, 2.3, 0.012, 63, { uv: 'unit' });
+          bx(b, trim, pm, -0.21, 0.88, 0.0, 0.21, 0.95, 0.02);
+          bx(b, trim, pm, -0.21, 2.3, 0.0, 0.21, 2.37, 0.02);
         }
-        tube(b, hide, hm, [-0.56, 0.36, 0], [-0.78, 0.1, 0], 0.05, 6);
-      }
+        cyl(b, trim, m, 0, 2.95, 0, 0.62, 0.12, 16);
+        // the canopy: sweeps out to every pole, a striped cone, a painted rounding board with bulbs, a scalloped valance
+        for (const [k, r0, r1, y0] of [['art_a', 3.24, 2.5, 3.32], ['art_b', 2.5, 1.7, 3.5], ['art_c', 1.7, 0.9, 3.68], ['art_d', 0.9, 0.3, 3.86]]) {
+          cyl(b, k, m, 0, y0, 0, r0, 0.18, 32, { rTop: r1, caps: false });
+        }
+        // the underside of the canopy: what the riders look up at, painted in sunburst panels
+        for (let i = 0; i < 16; i++) {
+          const a0 = (i / 16) * Math.PI * 2, a1 = ((i + 1) / 16) * Math.PI * 2, r0 = 0.62, r1 = 3.26, y = 3.34;
+          const P = (a, r) => new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r).applyMatrix4(m);
+          const A = P(a0, r0), B = P(a1, r0), Cc = P(a1, r1);
+          // a quad facing down: origin A, u = A->B (inner edge), v = toward the rim
+          const D = P(a0, r1);
+          b.quad(i % 2 ? 'gallery_red' : 'fabric_white', A.x, A.y, A.z, D.x - A.x, D.y - A.y, D.z - A.z, B.x - A.x, B.y - A.y, B.z - A.z, { uv: 'unit' });
+          void Cc;
+        }
+        cyl(b, trim, m, 0, 3.98, 0, 0.32, 0.22, 12);
+        sphereAt(b, trim, m, 0, 4.32, 0, 0.16);
+        cyl(b, trim, m, 0, 4.42, 0, 0.02, 0.5, 6);
+        bx(b, 'gallery_red', m, 0.02, 4.68, -0.01, 0.4, 4.88, 0.01);
+        cyl(b, 'metal_white', m, 0, 2.98, 0, 3.26, 0.36, 32, { caps: false });
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2 + 0.1, c = Math.cos(a), s = Math.sin(a);
+          const pm = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(c * 3.28, 0, s * 3.28).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2 - a)));
+          bx(b, panels[i % 4], pm, -0.5, 3.02, 0, 0.5, 3.3, 0.02, 63, { uv: 'unit' });
+          bx(b, trim, pm, -0.62, 2.98, 0, 0.62, 3.02, 0.04);
+          bx(b, trim, pm, -0.62, 3.3, 0, 0.62, 3.34, 0.04);
+          // the valance: one scallop per panel
+          bx(b, i % 2 ? 'gallery_red' : 'fabric_white', pm, -0.5, 2.8, 0.0, 0.5, 2.98, 0.01, 63);
+          bx(b, i % 2 ? 'gallery_red' : 'fabric_white', pm, -0.3, 2.72, 0.0, 0.3, 2.8, 0.01, 63);
+          for (const bxp of [-0.55, 0, 0.55]) bx(b, 'fixture_bulb', pm, bxp - 0.045, 3.12, 0.02, bxp + 0.045, 3.21, 0.07, 63, { uv: 'unit' });
+        }
+        for (let i = 0; i < N; i++) {
+          const a = (i / N) * Math.PI * 2, cx = Math.cos(a) * R, cz = Math.sin(a) * R;
+          cyl(b, trim, m, cx, 0.34, cz, 0.032, 2.64, 8);
+          for (const y of [0.34, 2.9]) cyl(b, trim, m, cx, y, cz, 0.06, 0.06, 8);
+          tube(b, 'metal_dark', m, [0, 2.96, 0], [cx, 2.98, cz], 0.03, 5);
+        }
+        // two chariots between the horses, for the ones who do not ride
+        for (const a of [Math.PI / N, Math.PI + Math.PI / N]) {
+          const c = Math.cos(a), s = Math.sin(a);
+          const pm = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(c * 1.6, 0.34, s * 1.6).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2 - a)));
+          bx(b, 'gold', pm, -0.55, 0, -0.34, 0.55, 0.42, 0.34);
+          bx(b, 'velvet', pm, -0.5, 0.42, -0.3, 0.5, 0.5, 0.3);
+          bx(b, 'gold', pm, -0.55, 0.42, -0.34, -0.42, 1.0, 0.34);
+          bx(b, panels[Math.round(a) % 4], pm, -0.56, 0.5, -0.3, -0.55, 0.95, 0.3, 63, { uv: 'unit' });
+          sphereAt(b, 'gold', pm, 0.55, 0.5, 0, 0.12);
+        }
+      };
+      const horse = (b, i) => {
+        const a = (i / N) * Math.PI * 2, cx = Math.cos(a) * R, cz = Math.sin(a) * R;
+        // local +x points along the way the deck turns: every horse runs nose to tail round the ring
+        const hm = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(cx, 1.42, cz).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2 - a)));
+        const hide = hides[(i + rng.int(0, 4)) % hides.length], sad = saddles[i % saddles.length];
+        const mane = i % 2 ? 'gold' : 'plastic_black';
+        // barrel: chest and rump spheres joined by a thick tube
+        sphereAt(b, hide, hm, 0.26, 0.02, 0, 0.25, 1.05);
+        sphereAt(b, hide, hm, -0.3, 0.02, 0, 0.26, 1.0);
+        tube(b, hide, hm, [-0.3, 0.02, 0], [0.26, 0.02, 0], 0.235, 10);
+        // neck, head, muzzle, ears, eyes
+        tube(b, hide, hm, [0.34, 0.08, 0], [0.58, 0.5, 0], 0.11, 8);
+        sphereAt(b, hide, hm, 0.6, 0.54, 0, 0.12, 1.0);
+        tube(b, hide, hm, [0.6, 0.56, 0], [0.86, 0.42, 0], 0.075, 8);
+        sphereAt(b, hide, hm, 0.87, 0.42, 0, 0.07, 0.9);
+        for (const s of [-1, 1]) {
+          tube(b, hide, hm, [0.56, 0.64, s * 0.05], [0.5, 0.78, s * 0.06], 0.022, 5);
+          sphereAt(b, 'plastic_black', hm, 0.7, 0.55, s * 0.075, 0.022);
+          bx(b, trim, hm, 0.62, 0.46, s * 0.075 - 0.006, 0.86, 0.48, s * 0.075 + 0.006);
+        }
+        // mane down the neck, and a tail
+        for (let k = 0; k < 6; k++) {
+          const t = k / 5, mx = 0.32 + t * 0.24, my = 0.16 + t * 0.44;
+          bx(b, mane, hm, mx - 0.06, my, -0.03, mx + 0.03, my + 0.1, 0.03);
+        }
+        tube(b, mane, hm, [-0.52, 0.12, 0], [-0.68, -0.08, 0], 0.05, 6);
+        tube(b, mane, hm, [-0.68, -0.08, 0], [-0.7, -0.38, 0], 0.04, 6);
+        // saddle, blanket and stirrups
+        bx(b, sad, hm, -0.24, 0.22, -0.25, 0.18, 0.3, 0.25);
+        bx(b, trim, hm, -0.26, 0.2, -0.27, 0.2, 0.23, 0.27);
+        bx(b, sad, hm, -0.26, 0.3, -0.12, -0.18, 0.4, 0.12);
+        for (const s of [-1, 1]) {
+          tube(b, 'metal_dark', hm, [-0.02, 0.2, s * 0.26], [-0.02, -0.12, s * 0.28], 0.01, 4);
+          bx(b, trim, hm, -0.06, -0.15, s * 0.28 - 0.03, 0.02, -0.12, s * 0.28 + 0.03);
+        }
+        // legs: front pair prancing, hind pair planted
+        for (const s of [-1, 1]) {
+          tube(b, hide, hm, [0.3, -0.12, s * 0.12], [0.5, -0.3, s * 0.13], 0.055, 6);
+          tube(b, hide, hm, [0.5, -0.3, s * 0.13], [0.42, -0.52, s * 0.13], 0.045, 6);
+          cyl(b, 'plastic_black', hm, 0.42, -0.6, s * 0.13, 0.05, 0.08, 6);
+          tube(b, hide, hm, [-0.36, -0.12, s * 0.12], [-0.42, -0.45, s * 0.12], 0.06, 6);
+          tube(b, hide, hm, [-0.42, -0.45, s * 0.12], [-0.34, -0.78, s * 0.12], 0.045, 6);
+          cyl(b, 'plastic_black', hm, -0.34, -0.86, s * 0.12, 0.05, 0.08, 6);
+        }
+      };
+      const mv = addMover(world, l, ctx, body, p);
+      if (!mv) return;
+      const horses = [];
+      for (let i = 0; i < N; i++) horses.push(attachPart(world, l, mv, (b) => horse(b, i), p));
+      const spin = this.spin;
+      mv.update = (dt, t) => {
+        mv.outer.rotation.y = t * spin;
+        for (let i = 0; i < horses.length; i++) horses[i].position.y = -p.y + 0.16 * Math.sin(t * 1.7 + i * 1.9);
+      };
     },
   },
   trampoline: {
@@ -10972,45 +11190,94 @@ const PROPS = {
     },
   },
   escalator: {
+    // a running escalator. The steps are colliders that carry whoever stands on them
+    // up toward local +z (opts.down runs it the other way, opts.still stops it); the
+    // treads you see are a separate row of moving steps that loop up the incline.
     size: [1.7, 6.2], wall: false, dynamicSize: true,
     collidersFor(o) {
-      const len = o.len || 5.6, rise = o.rise || 2.6, n = o.steps || 14;
+      const len = o.len || 5.6, rise = o.rise || 2.6, n = o.steps || Math.max(12, Math.round(rise / 0.19));
       const run = len / n, riser = rise / n, z0 = -(len + 1.6) / 2;
       const out = [[-0.7, 0, z0, 0.7, 0.06, z0 + 0.8]];
       for (let i = 0; i < n; i++) {
         const za = z0 + 0.8 + i * run, zb = za + run, top = 0.06 + (i + 1) * riser;
-        out.push([-0.62, 0, za, 0.62, top, zb]);
-        out.push([-0.7, 0.06 + i * riser, za, -0.62, top + 1.0, zb]);
-        out.push([0.62, 0.06 + i * riser, za, 0.7, top + 1.0, zb]);
+        out.push([-0.62, 0, za, 0.62, top, zb, o.still ? undefined : 'belt']);
+        out.push([-0.78, 0.06 + i * riser, za, -0.62, top + 1.0, zb]);
+        out.push([0.62, 0.06 + i * riser, za, 0.78, top + 1.0, zb]);
       }
       const zt = z0 + 0.8 + len;
       out.push([-0.7, 0, zt, 0.7, 0.06 + rise + 0.05, zt + 0.8]);
       return out;
     },
     build(b, m, rng, o) {
-      const len = o.len || 5.6, rise = o.rise || 2.6, n = o.steps || 14;
-      const run = len / n, riser = rise / n, z0 = -(len + 1.6) / 2;
-      const deck = o.deck || 'metal_grey';
-      bx(b, deck, m, -0.72, 0, z0 - 0.2, 0.72, 0.06, z0 + 0.8);
-      cyl(b, 'steel', m, -0.4, -0.9, z0 + 0.4, 0.1, 0.9, 8);
-      cyl(b, 'steel', m, 0.4, -0.9, z0 + 0.4, 0.1, 0.9, 8);
-      for (let i = 0; i < n; i++) {
-        const za = z0 + 0.8 + i * run, zb = za + run, top = 0.06 + (i + 1) * riser, y = 0.06 + i * riser;
-        bx(b, 'steel', m, -0.6, y, za, 0.6, top, zb);
-        bx(b, 'metal_dark', m, -0.6, top - 0.014, za, 0.6, top, zb, 63 & ~8);
-        for (const s of [-1, 1]) {
-          bx(b, 'metal_white', m, s > 0 ? 0.62 : -0.7, y, za, s > 0 ? 0.7 : -0.62, top + 0.02, zb, 63 & ~8);
-          bx(b, 'glass', m, s > 0 ? 0.63 : -0.68, top + 0.02, za, s > 0 ? 0.69 : -0.63, top + 0.94, zb, 63 & ~8);
-          tube(b, 'rubber_black', m, [s * 0.655, top + 1.0, za], [s * 0.655, top + 1.0 + riser, zb], 0.035, 6);
-        }
-        if (i < 2 || i > n - 3) bx(b, 'hazard', m, -0.6, top, za, 0.6, top + 0.005, zb, 63 & ~8);
-      }
-      const zt = z0 + 0.8 + len;
+      const len = o.len || 5.6, rise = o.rise || 2.6, n = o.steps || Math.max(12, Math.round(rise / 0.19));
+      const run = len / n, riser = rise / n, z0 = -(len + 1.6) / 2, zs = z0 + 0.8, zt = zs + len;
+      const deck = o.deck || 'metal_grey', side = o.side || 'metal_white';
+      // landing plates with comb plates and a hazard edge
+      bx(b, deck, m, -0.72, 0, z0 - 0.2, 0.72, 0.06, zs);
+      bx(b, 'hazard', m, -0.6, 0.06, zs - 0.1, 0.6, 0.065, zs, 63 & ~8);
       bx(b, 'steel', m, -0.72, 0, zt, 0.72, 0.06 + rise + 0.04, zt + 0.8);
-      bx(b, 'metal_dark', m, -0.72, 0.06 + rise + 0.04, zt, 0.72, 0.06 + rise + 0.06, zt + 0.8, 63 & ~8);
-      bx(b, 'rubber_black', m, -0.3, 0.06 + rise + 0.06, zt + 0.1, 0.3, 0.08 + rise + 0.06, zt + 0.6);
-      for (const s of [-1, 1]) bx(b, 'metal_white', m, s > 0 ? 0.62 : -0.72, 0, zt - 0.4, s > 0 ? 0.72 : -0.62, 0.06 + rise + 1.0, zt + 0.8, 63 & ~8);
-      bx(b, 'metal_white', m, -0.72, 0.06 + rise, zt, 0.72, 0.06 + rise + 1.0, zt + 0.15, 63 & ~8);
+      bx(b, deck, m, -0.72, 0.06 + rise + 0.04, zt, 0.72, 0.06 + rise + 0.06, zt + 0.8, 63 & ~8);
+      bx(b, 'hazard', m, -0.6, 0.06 + rise + 0.06, zt, 0.6, 0.065 + rise + 0.06, zt + 0.1, 63 & ~8);
+      // the truss under the incline, the dark well the steps run in, and the skirts beside them
+      const slope = Math.atan2(rise, len), L = Math.hypot(len, rise);
+      const sm = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(0, 0.06 + rise / 2, zs + len / 2).multiply(new THREE.Matrix4().makeRotationX(-slope)));
+      bx(b, 'metal_dark', sm, -0.6, -0.42, -L / 2, 0.6, -0.3, L / 2);
+      bx(b, side, sm, -0.78, -0.9, -L / 2, 0.78, -0.42, L / 2);
+      for (const s of [-1, 1]) {
+        bx(b, 'steel', sm, s > 0 ? 0.6 : -0.64, -0.42, -L / 2, s > 0 ? 0.64 : -0.6, 0.06, L / 2);
+        bx(b, side, sm, s > 0 ? 0.64 : -0.78, -0.9, -L / 2, s > 0 ? 0.78 : -0.64, 0.12, L / 2);
+        bx(b, 'glass', sm, s > 0 ? 0.68 : -0.73, 0.12, -L / 2, s > 0 ? 0.73 : -0.68, 1.0, L / 2, 63 & ~8);
+        bx(b, 'rubber_black', sm, s > 0 ? 0.65 : -0.76, 1.0, -L / 2, s > 0 ? 0.76 : -0.65, 1.07, L / 2);
+        // the balustrade carries on flat over each landing and turns down into the newel
+        // (opts.landings === false: an escalator you step off sideways, onto a gallery)
+        if (o.landings !== false) {
+        bx(b, 'glass', m, s > 0 ? 0.68 : -0.73, 0.06, z0 - 0.2, s > 0 ? 0.73 : -0.68, 1.0, zs, 63 & ~8);
+        bx(b, 'rubber_black', m, s > 0 ? 0.65 : -0.76, 1.0, z0 - 0.2, s > 0 ? 0.76 : -0.65, 1.07, zs);
+        cyl(b, 'rubber_black', m, s * 0.705, 0.55, z0 - 0.2, 0.06, 0.52, 10);
+        bx(b, 'glass', m, s > 0 ? 0.68 : -0.73, 0.1 + rise, zt, s > 0 ? 0.73 : -0.68, 1.06 + rise, zt + 0.8, 63 & ~8);
+        bx(b, 'rubber_black', m, s > 0 ? 0.65 : -0.76, 1.06 + rise, zt, s > 0 ? 0.76 : -0.65, 1.13 + rise, zt + 0.8);
+        cyl(b, 'rubber_black', m, s * 0.705, 0.6 + rise, zt + 0.8, 0.06, 0.53, 10);
+        }
+        bx(b, side, m, s > 0 ? 0.64 : -0.78, 0, z0 - 0.2, s > 0 ? 0.78 : -0.64, 0.12, zs);
+        bx(b, 'fixture_green', m, s > 0 ? 0.6 : -0.62, 0.07, z0 - 0.18, s > 0 ? 0.62 : -0.6, 0.11, z0 - 0.05, 63, { uv: 'unit' });
+      }
+      // a still escalator is just stairs: build its steps into the chunk
+      if (o.still) for (let i = 0; i < n; i++) {
+        const za = zs + i * run, zb = za + run, top = 0.06 + (i + 1) * riser;
+        bx(b, 'steel', m, -0.6, top - riser, za, 0.6, top, zb);
+        bx(b, 'metal_dark', m, -0.6, top - 0.014, za, 0.6, top, zb, 63 & ~8);
+      }
+      void rng;
+    },
+    dynamic(world, l, ctx, p, m, rng, o) {
+      if (o.still) return;
+      const len = o.len || 5.6, rise = o.rise || 2.6, n = o.steps || Math.max(12, Math.round(rise / 0.19));
+      const run = len / n, riser = rise / n, zs = -(len + 1.6) / 2 + 0.8;
+      // one tread (plate, cleats, riser, yellow demarcation) at the bottom of the run; the rest are copies
+      const step = (b) => {
+        bx(b, 'steel', m, -0.6, 0.06 + riser - 0.03, zs, 0.6, 0.06 + riser, zs + run);
+        for (let k = 0; k < 6; k++) bx(b, 'metal_dark', m, -0.58 + k * 0.2, 0.06 + riser, zs + 0.01, -0.5 + k * 0.2, 0.066 + riser, zs + run - 0.01, 4);
+        bx(b, 'metal_dark', m, -0.6, 0.06, zs - 0.004, 0.6, 0.06 + riser, zs + 0.004);
+        bx(b, 'metal_yellow', m, -0.6, 0.06 + riser - 0.028, zs + run - 0.04, 0.6, 0.067 + riser, zs + run);
+        bx(b, 'metal_yellow', m, -0.6, 0.06 + riser - 0.028, zs, -0.56, 0.067 + riser, zs + run);
+        bx(b, 'metal_yellow', m, 0.56, 0.06 + riser - 0.028, zs, 0.6, 0.067 + riser, zs + run);
+      };
+      const mv = addMover(world, l, ctx, step, null);
+      if (!mv) return;
+      const treads = [mv.outer];
+      for (let k = 1; k <= n; k++) { const c = mv.outer.clone(); mv.outer.parent.add(c); treads.push(c); }
+      const c = Math.cos(p.rot), sn = Math.sin(p.rot), speed = o.speed ?? 0.7, dir = o.down ? -1 : 1;
+      mv.update = (dt, t) => {
+        const u = (((dir * t * speed) / run) % 1 + 1) % 1;
+        for (let k = 0; k < treads.length; k++) {
+          const f = k - 1 + u;                            // steps from the bottom of the run
+          const tr = treads[k];
+          tr.visible = f >= 0 && f <= n - 1;
+          const dz = f * run, dy = f * riser;
+          tr.position.set(dz * sn, dy, dz * c);
+        }
+      };
+      void rng;
     },
   },
   mirror_panel: {
@@ -11413,31 +11680,83 @@ function worldAABB(c, x, y, z, rot, scale = 1) {
   return [minX, y + c[1] * scale, minZ, maxX, y + c[4] * scale, maxZ];
 }
 
+/**
+ * A prop's colliders in world space: [{ a: [minX, minY, minZ, maxX, maxY, maxZ], carry }].
+ * carry is what the collider does to whoever stands on it (see Player.carry).
+ */
+function propColliders(type, x, y, z, rot, opts = {}, scale = 1) {
+  const def = PROPS[type], out = [];
+  const cols = def && (def.collidersFor ? def.collidersFor(opts) : def.colliders);
+  if (!cols || cols === 'self') return out;
+  for (const c of cols) {
+    let carry = null;
+    if (c[6] === 'spin' && !opts.still) carry = { spin: def.spin || 0.4, x, z };
+    else if (c[6] === 'belt') carry = { belt: (opts.speed ?? 0.7) * (opts.down ? -1 : 1), dx: Math.sin(rot), dz: Math.cos(rot) };
+    out.push({ a: worldAABB(c, x, y, z, rot, scale), carry });
+  }
+  return out;
+}
+
 /** Register a prop in a layout: adds colliders now, geometry at build time. */
 function addProp(l, type, x, y, z, rot, opts = {}, seed = 0) {
   const def = PROPS[type];
   if (!def) return null;
   const p = { type, x, y, z, rot, opts, seed, scale: opts.scale || 1 };
   l.props.push(p);
-  const cols = def.collidersFor ? def.collidersFor(opts) : def.colliders;
-  if (cols && cols !== 'self') {
-    for (const c of cols) {
-      const a = worldAABB(c, x, y, z, rot, p.scale);
-      const col = makeCollider(a[0], a[1], a[2], a[3], a[4], a[5], opts.flags ?? (C.SOLID | C.PLATFORM | (opts.occlude ? C.OCCLUDE : 0)));
-      col.owner = p;
-      l.colliders.add(col);
-    }
+  for (const { a, carry } of propColliders(type, x, y, z, rot, opts, p.scale)) {
+    const col = makeCollider(a[0], a[1], a[2], a[3], a[4], a[5], opts.flags ?? (C.SOLID | C.PLATFORM | (opts.occlude ? C.OCCLUDE : 0)));
+    col.owner = p;
+    if (carry) col.carry = carry;
+    l.colliders.add(col);
+  }
+  if (def.light && l.fixtures && !opts.dark) {
+    const L = def.light;
+    l.fixtures.push({ x, y: y + L.y, z, type: 'bulb', emit: 'omni', frame: false, color: L.color, intensity: L.intensity, flicker: FLICKER.STEADY, soft: 0.6, range: L.range });
   }
   if (def.hide) p.hide = true;
   return p;
 }
 
-function buildProps(l, b, rngFactory) {
+/**
+ * Moving parts. build(b) fills a fresh GeometryBuilder in world space; the result is
+ * light-baked like the chunk, hung under ctx.dynamic and turned about the pivot
+ * (pivot = the prop, or null for a mover that only translates). update(dt, t) is
+ * called every frame by World.update until the chunk is disposed.
+ */
+function addMover(world, l, ctx, build, pivot) {
+  if (!world || !ctx || !ctx.dynamic) return null;
+  const b = new GeometryBuilder(world.lib);
+  build(b);
+  const inner = b.finalize(world.makeBakeCtx(l), (key) => world.lib.get(key, 'vertex'));
+  const outer = new THREE.Group();
+  if (pivot) { outer.position.set(pivot.x, pivot.y, pivot.z); inner.position.set(-pivot.x, -pivot.y, -pivot.z); }
+  outer.add(inner);
+  ctx.dynamic.add(outer);
+  const mv = { outer, inner, update() {} };
+  world.movers.add(mv);
+  (ctx.objects || (ctx.objects = [])).push({ dispose() { world.movers.delete(mv); } });
+  return mv;
+}
+
+/** A second moving part that rides along with a mover (a carousel horse on its pole). */
+function attachPart(world, l, mv, build, pivot) {
+  const b = new GeometryBuilder(world.lib);
+  build(b);
+  const g = b.finalize(world.makeBakeCtx(l), (key) => world.lib.get(key, 'vertex'));
+  g.position.set(-pivot.x, -pivot.y, -pivot.z);
+  mv.outer.add(g);
+  return g;
+}
+
+function buildProps(l, b, rngFactory, world = null, ctx = null) {
   for (const p of l.props) {
     const def = PROPS[p.type];
     if (!def) continue;
     const m = propMatrix(p.x, p.y, p.z, p.rot, p.scale);
     def.build(b, m, rngFactory(p.seed), p.opts);
+    if (def.dynamic && world && ctx) {
+      try { def.dynamic(world, l, ctx, p, m, rngFactory(p.seed ^ 0x6d0f), p.opts); } catch (e) { console.warn('moving prop', p.type, e); }
+    }
   }
 }
 
@@ -11916,6 +12235,8 @@ function placeProps(world, l, rng, set, P, y = 0) {
 __e['propMatrix'] = propMatrix;
 __e['addProp'] = addProp;
 __e['buildProps'] = buildProps;
+__e['addMover'] = addMover;
+__e['propColliders'] = propColliders;
 __e['spaceFree'] = spaceFree;
 __e['wallSlots'] = wallSlots;
 __e['addContainer'] = addContainer;
@@ -12385,7 +12706,8 @@ const GOAL_INFO = {
   keypad: { wall: true, depth: 0.12, prompt: 'Enter the access code', color: '#3dff7a' },
   portal_window: { wall: true, depth: 0.2, prompt: 'Climb through the window', color: '#ffffff' },
   musicbox: { wall: false, size: 0.5, prompt: 'Wind the music box', color: '#ffb0d0' },
-  slide: { wall: false, size: 1.6, prompt: 'Sit down and push off', color: '#7fd6ff', reach: 7, big: true },
+  slide: { wall: true, depth: 0.8, size: 1.6, prompt: 'Climb into the slide', color: '#7fd6ff', reach: 4.5 },
+  escalator: { wall: false, size: 3.6, prompt: 'Go through the door at the top', color: '#3dff7a', reach: 10, big: true },
   stairs: { wall: false, size: 3.6, prompt: 'Open the stairwell door', color: '#3dff7a', reach: 10, big: true },
   stairshaft: { wall: false, size: 3.2, prompt: 'Open the stairwell door', color: '#3dff7a', reach: 4.5, big: true },
 };
@@ -12429,6 +12751,103 @@ function signTex(text, color, w = 512, h = 160) {
     g.font = `bold ${Math.floor(h * 0.62)}px Arial, sans-serif`;
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText(text, w / 2, h / 2 + 4);
+  });
+}
+
+/**
+ * The paint round a slide's mouth. Every slide in a row gets tags, drips and a
+ * few distractions (arrows, entity faces); the puzzle fields decide what the
+ * clue note talks about: `mark` (a symbol over the hole), `face` (an entity
+ * face painted beside it) and `arrows` (how many arrows point at the hole).
+ * The canvas maps onto a 3.0 x 2.6 m plane whose centre is 1.3 m up the wall;
+ * the hole is at 0.9 m, i.e. (256, 293) on the 512 x 448 canvas.
+ */
+const SLIDE_MARKS = ['crown', 'star', 'spiral', 'eye', 'hand', 'moon', 'skull', 'heart'];
+function graffitiTex(o) {
+  const seed = (o.seed || 1) >>> 0;
+  let st = seed || 1;
+  const rnd = () => { st ^= st << 13; st >>>= 0; st ^= st >>> 17; st ^= st << 5; st >>>= 0; return st / 4294967296; };
+  const pick = (a) => a[Math.floor(rnd() * a.length)];
+  const CX = 256, CY = 293, HR = 126;
+  const inks = ['#ff3a6e', '#3af0ff', '#ffe23a', '#7dff4a', '#ff8a1a', '#c86bff', '#ffffff'];
+  return canvasTex(512, 448, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    const spray = (col, width, fn) => {
+      g.save(); g.strokeStyle = col; g.fillStyle = col; g.lineWidth = width; g.shadowColor = col; g.shadowBlur = width * 1.6;
+      g.beginPath(); fn(); g.stroke(); g.restore();
+    };
+    const drip = (x, y, col) => {
+      g.save(); g.strokeStyle = col; g.globalAlpha = 0.7; g.lineWidth = 2.5;
+      const n = 1 + Math.floor(rnd() * 3);
+      for (let i = 0; i < n; i++) { const dx = x + (rnd() - 0.5) * 30; g.beginPath(); g.moveTo(dx, y); g.lineTo(dx, y + 12 + rnd() * 46); g.stroke(); }
+      g.restore();
+    };
+    const outside = (x, y, pad = 18) => Math.hypot(x - CX, y - CY) > HR + pad;
+    // tags and squiggles: noise round the hole, nothing to read into
+    for (let k = 0; k < 7; k++) {
+      const col = pick(inks), x = 40 + rnd() * 430, y = 40 + rnd() * 370;
+      if (!outside(x, y, 40)) continue;
+      g.save(); g.globalAlpha = 0.55 + rnd() * 0.3;
+      spray(col, 5 + rnd() * 6, () => {
+        g.moveTo(x, y);
+        for (let i = 0; i < 6; i++) g.quadraticCurveTo(x + (rnd() - 0.5) * 90, y + (rnd() - 0.5) * 60, x + (rnd() - 0.2) * 80, y + (rnd() - 0.5) * 50);
+      });
+      g.restore();
+      if (rnd() < 0.5) drip(x, y + 10, col);
+    }
+    // arrows that point at the hole, from wherever they were painted
+    const arrow = (ang, col) => {
+      const r0 = HR + 120, r1 = HR + 26;
+      const x0 = CX + Math.cos(ang) * r0, y0 = CY + Math.sin(ang) * r0, x1 = CX + Math.cos(ang) * r1, y1 = CY + Math.sin(ang) * r1;
+      const a = Math.atan2(y1 - y0, x1 - x0);
+      spray(col, 9, () => {
+        g.moveTo(x0, y0); g.quadraticCurveTo((x0 + x1) / 2 + Math.sin(ang) * 22, (y0 + y1) / 2 - Math.cos(ang) * 22, x1, y1);
+        g.moveTo(x1, y1); g.lineTo(x1 - Math.cos(a - 0.5) * 30, y1 - Math.sin(a - 0.5) * 30);
+        g.moveTo(x1, y1); g.lineTo(x1 - Math.cos(a + 0.5) * 30, y1 - Math.sin(a + 0.5) * 30);
+      });
+    };
+    const nArrows = o.arrows ?? 0;
+    const angs = [-2.4, -0.7, 2.6, 0.5, -1.57, 3.14, 0.0];
+    for (let i = 0; i < nArrows; i++) arrow(angs[(i + (seed & 3)) % angs.length] + (rnd() - 0.5) * 0.3, pick(inks));
+    // an entity's face, sprayed beside the hole
+    const face = (kind, x, y, s) => {
+      const col = pick(['#ffffff', '#ffe23a', '#ff3a6e']);
+      if (kind === 'grin') {
+        spray(col, 5, () => { g.ellipse(x - s * 0.35, y - s * 0.3, s * 0.18, s * 0.07, -0.25, 0, 6.3); });
+        spray(col, 5, () => { g.ellipse(x + s * 0.35, y - s * 0.3, s * 0.18, s * 0.07, 0.25, 0, 6.3); });
+        spray(col, 6, () => { g.moveTo(x - s * 0.7, y + s * 0.05); g.quadraticCurveTo(x, y + s * 0.85, x + s * 0.7, y + s * 0.05); g.quadraticCurveTo(x, y + s * 0.35, x - s * 0.7, y + s * 0.05); });
+        for (let i = -5; i <= 5; i++) spray(col, 3, () => { g.moveTo(x + i * s * 0.11, y + s * (0.2 + 0.2 * (1 - Math.abs(i) / 6))); g.lineTo(x + i * s * 0.11, y + s * (0.42 + 0.18 * (1 - Math.abs(i) / 6))); });
+      } else if (kind === 'eyes') {
+        for (let i = 0; i < 7; i++) {
+          const ex = x + (rnd() - 0.5) * s * 1.6, ey = y + (rnd() - 0.5) * s * 1.2, er = s * (0.1 + rnd() * 0.1);
+          spray(col, 4, () => { g.ellipse(ex, ey, er * 1.6, er, 0, 0, 6.3); });
+          g.save(); g.fillStyle = col; g.beginPath(); g.arc(ex, ey, er * 0.45, 0, 6.3); g.fill(); g.restore();
+        }
+      } else {
+        spray(col, 6, () => { g.arc(x, y, s * 0.7, 0, 6.3); });
+        spray(col, 6, () => { g.moveTo(x - s * 0.3, y - s * 0.3); g.lineTo(x - s * 0.15, y - s * 0.15); g.moveTo(x + s * 0.15, y - s * 0.3); g.lineTo(x + s * 0.3, y - s * 0.15); });
+        spray(col, 6, () => { g.arc(x, y + s * 0.1, s * 0.4, 0.3, Math.PI - 0.3); });
+      }
+      drip(x, y + s * 0.7, col);
+    };
+    if (o.face) face(o.face, rnd() < 0.5 ? 70 : 440, 120 + rnd() * 180, 52);
+    // the mark over the hole
+    const mark = (kind, x, y, s, col) => {
+      if (kind === 'crown') spray(col, 7, () => { g.moveTo(x - s, y + s * 0.5); g.lineTo(x - s, y - s * 0.4); g.lineTo(x - s * 0.5, y + s * 0.1); g.lineTo(x, y - s * 0.6); g.lineTo(x + s * 0.5, y + s * 0.1); g.lineTo(x + s, y - s * 0.4); g.lineTo(x + s, y + s * 0.5); g.closePath(); });
+      else if (kind === 'star') spray(col, 7, () => { for (let i = 0; i <= 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? s * 0.42 : s; g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } });
+      else if (kind === 'spiral') spray(col, 6, () => { for (let i = 0; i < 60; i++) { const a = i * 0.32, r = s * i / 60; g.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } });
+      else if (kind === 'eye') { spray(col, 7, () => { g.moveTo(x - s, y); g.quadraticCurveTo(x, y - s * 0.9, x + s, y); g.quadraticCurveTo(x, y + s * 0.9, x - s, y); }); g.save(); g.fillStyle = col; g.beginPath(); g.arc(x, y, s * 0.28, 0, 6.3); g.fill(); g.restore(); }
+      else if (kind === 'hand') spray(col, 7, () => { g.moveTo(x - s * 0.5, y + s); g.lineTo(x - s * 0.5, y); for (let f = 0; f < 4; f++) { const fx = x - s * 0.5 + f * s * 0.33; g.lineTo(fx, y - s * 0.9); g.lineTo(fx + s * 0.16, y - s * 0.9); g.lineTo(fx + s * 0.16, y); } g.lineTo(x + s * 0.5, y + s * 0.2); g.lineTo(x + s * 0.9, y - s * 0.3); g.lineTo(x + s * 0.5, y + s); });
+      else if (kind === 'moon') spray(col, 7, () => { g.arc(x, y, s * 0.8, 0.6, Math.PI * 2 - 0.6); g.arc(x + s * 0.4, y, s * 0.6, Math.PI * 2 - 0.9, 0.9, true); });
+      else if (kind === 'skull') { spray(col, 7, () => { g.arc(x, y - s * 0.1, s * 0.7, Math.PI * 0.85, Math.PI * 2.15); g.lineTo(x + s * 0.4, y + s * 0.8); g.lineTo(x - s * 0.4, y + s * 0.8); g.closePath(); }); g.save(); g.fillStyle = col; for (const sx of [-1, 1]) { g.beginPath(); g.arc(x + sx * s * 0.28, y, s * 0.17, 0, 6.3); g.fill(); } g.restore(); }
+      else if (kind === 'heart') spray(col, 7, () => { g.moveTo(x, y + s * 0.8); g.bezierCurveTo(x - s * 1.3, y, x - s * 0.6, y - s, x, y - s * 0.35); g.bezierCurveTo(x + s * 0.6, y - s, x + s * 1.3, y, x, y + s * 0.8); });
+      drip(x, y + s * 0.7, col);
+    };
+    if (o.mark) mark(o.mark, CX + (rnd() - 0.5) * 60, 58, 40, pick(inks));
+    // a dark ring of grime where hands and shoes have rubbed round the mouth
+    g.save(); g.globalAlpha = 0.35; g.strokeStyle = '#1a140c'; g.lineWidth = 22; g.shadowColor = '#000'; g.shadowBlur = 30;
+    g.beginPath(); g.arc(CX, CY, HR + 8, 0, 6.3); g.stroke(); g.restore();
   });
 }
 
@@ -12691,7 +13110,9 @@ class Goal {
       this.box(wood, -0.72, 0.76, 0, 0.72, 0.8, 0.3);
       P.view = this.add(xf(new THREE.PlaneGeometry(1.16, 1.36), { y: 1.56, z: 0.02 }), glowMat('#ffffff', { map: viewTex(this.opts && this.opts.view), fog: false }));
       P.view.material.color.setRGB(0.75, 0.75, 0.75);
-    } else if (t === 'slide' || t === 'stairs' || t === 'stairshaft') {
+    } else if (t === 'slide') {
+      this.buildSlideMouth();
+    } else if (t === 'stairs' || t === 'stairshaft' || t === 'escalator') {
       this.buildStructure(t);
     } else if (t === 'musicbox') {
       this.add(xf(new THREE.CylinderGeometry(0.04, 0.05, 0.75, 10), { y: 0.375 }), 'wood_dark');
@@ -12772,27 +13193,103 @@ class Goal {
       this.collider(-dw, R, -3.4, dw, R + 2.2, -3.2);
     } else if (t === 'stairshaft') {
       this.buildStairwell(P, tints[hue], glows[hue]);
-    } else {
-      // a slide tower: ten steps up to a launch platform, a numbered arch, and a chute of
-      // moulded plastic running away from it downhill into a tunnel mouth. The ride itself
-      // carries you much farther than this (see Ride), and the plastic is what you ride on:
-      // opaque, printed, with just enough sheen to catch the park lights.
-      const len = this.opts.len || 8, H = 3.0, n = 10, run = 0.34, tint = tints[hue], glow = glows[hue];
-      const plastic = SLIDE_PLASTIC[hue % SLIDE_PLASTIC.length];
-      this.steps('metal_grey', -0.95, 0.95, 5.8, run, n, H, tint, 0.95, 1.1, 0.9);
-      this.box('metal_white', -1.1, 0, 0.4, 1.1, H, 2.4); this.collider(-1.1, 0, 0.4, 1.1, H, 2.4);
-      for (const [a, b] of [[-1.1, -0.95], [0.95, 1.1]]) { this.box(plastic, a, H, 0.4, b, H + 0.9, 2.4); this.collider(a, H, 0.4, b, H + 0.9, 2.4); }
-      for (const x of [-1.0, 0.88]) this.box(plastic, x, H, 0.3, x + 0.12, H + 2.3, 0.5);
-      this.box(plastic, -1.0, H + 2.2, 0.3, 1.0, H + 2.4, 0.5);
-      this.glowSign(String(this.opts.num || 1), glow, 0.5, 0.4, H + 2.0, 0.52);
-      const drop = H - 0.55, l = Math.hypot(len, drop), ang = Math.atan2(drop, len), cy = (H + 0.55) / 2 - 0.02, cz = 0.4 - len / 2;
-      // the chute: a solid plastic bed, plastic side walls, and the surface you ride on
-      this.add(xf(new THREE.BoxGeometry(1.6, 0.08, l), { y: cy, z: cz, rx: -ang }), plastic);
-      for (const x of [-0.8, 0.8]) this.add(xf(new THREE.BoxGeometry(0.1, 0.5, l), { x, y: cy + 0.22, z: cz, rx: -ang }), plastic);
-      P.chute = this.add(xf(new THREE.PlaneGeometry(1.45, l), { y: cy + 0.055, z: cz, rx: -Math.PI / 2 - ang }), plastic);
-      this.box(tint, -1.5, 0, -len - 1.3, 1.5, 2.4, -len - 0.2); this.collider(-1.5, 0, -len - 1.3, 1.5, 2.4, -len - 0.2);
-      this.add(xf(new THREE.PlaneGeometry(1.5, 1.5), { y: 1.15, z: -len - 0.19 }), glowMat('#000000'));
+    } else if (t === 'escalator') {
+      this.buildEscalatorGoal(P, tints[hue], glows[hue]);
     }
+  }
+
+  /**
+   * A slide, the way the backrooms build them: all you ever see is the mouth, a
+   * moulded plastic tube end standing out of the wall, with spray paint all round
+   * it. The ride itself happens inside (see Ride). Wall goal: the wall is the
+   * local z = 0 plane and the mouth sticks out toward +z. A slide that found no
+   * wall (opts.freestanding) brings a short stretch of plastic panel wall with it.
+   */
+  buildSlideMouth() {
+    const P = this.parts, o = this.opts, hue = (o.hue || 0) % SLIDE_PLASTIC.length;
+    const plastic = SLIDE_PLASTIC[hue];
+    const cols = [0xb3b9c4, 0xdb4034, 0x3d8ee0, 0xe8c22a, 0x3fc468, 0xe07c26];
+    const Y = 0.9, R = 0.62, D = 0.72;
+    if (o.freestanding) {
+      this.box('plastic_white', -1.6, 0, -0.32, 1.6, 2.9, -0.02);
+      this.box(plastic, -1.66, 0, -0.36, -1.6, 2.9, 0.02); this.box(plastic, 1.6, 0, -0.36, 1.66, 2.9, 0.02);
+      this.box(plastic, -1.66, 2.9, -0.36, 1.66, 3.0, 0.02);
+      this.collider(-1.66, 0, -0.36, 1.66, 3.0, 0.0);
+    }
+    // the paint on the wall round it
+    P.paint = this.add(xf(new THREE.PlaneGeometry(3.0, 2.6), { y: 1.3, z: 0.015 }), new THREE.MeshBasicMaterial({ map: graffitiTex(o), transparent: true, depthWrite: false }));
+    P.paint.renderOrder = 2;
+    // the tube end: a plastic sleeve out of the wall, a rolled lip, and a dark throat
+    const sleeve = this.add(xf(new THREE.CylinderGeometry(R + 0.06, R + 0.1, D, 28, 1, true), { y: Y, z: D / 2, rx: Math.PI / 2 }), plastic);
+    void sleeve;
+    this.add(xf(new THREE.TorusGeometry(R + 0.03, 0.075, 10, 32), { y: Y, z: D }), plastic);
+    this.add(xf(new THREE.TorusGeometry(R + 0.12, 0.04, 8, 32), { y: Y, z: 0.03 }), plastic);
+    const throat = canvasTex(64, 256, (g, w, h) => {
+      const gr = g.createLinearGradient(0, 0, 0, h);
+      const c = '#' + cols[hue].toString(16).padStart(6, '0');
+      // the top of the canvas is the mouth end of the tube, the bottom is deep inside
+      gr.addColorStop(0, c); gr.addColorStop(0.12, c); gr.addColorStop(0.5, '#000000'); gr.addColorStop(1, '#000000');
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+      g.globalAlpha = 0.18; g.fillStyle = '#ffffff';
+      for (let y = 4; y < h * 0.4; y += 22) g.fillRect(0, y, w, 3);
+    });
+    P.throat = this.add(xf(new THREE.CylinderGeometry(R, R, D - 0.03, 28, 1, true), { y: Y, z: (D + 0.03) / 2, rx: Math.PI / 2 }), new THREE.MeshBasicMaterial({ map: throat, side: THREE.BackSide }));
+    // the far end of the throat: black, in front of the wall so nothing shows through
+    this.add(xf(new THREE.CircleGeometry(R, 28), { y: Y, z: 0.03 }), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+    // a scuffed plastic step under the mouth, the bolts of the flange and the slide's number
+    this.box(plastic, -0.7, 0, 0, 0.7, 0.24, 0.95);
+    this.box('rubber_black', -0.62, 0.24, 0.55, 0.62, 0.25, 0.92);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      this.add(xf(new THREE.CylinderGeometry(0.025, 0.025, 0.03, 6), { x: Math.cos(a) * (R + 0.12), y: Y + Math.sin(a) * (R + 0.12), z: 0.07, rx: Math.PI / 2 }), 'chrome');
+    }
+    this.glowSign(String(o.num || 1), '#' + cols[hue].toString(16).padStart(6, '0'), 0.3, 0.24, Y + R + 0.32, 0.04);
+    this.collider(-0.78, 0, 0, 0.78, Y + R + 0.18, D + 0.08);
+    this.paintMats = [P.paint.material, P.throat.material];
+  }
+
+  /**
+   * An escalator up to a door: a running escalator (its steps carry you) climbing
+   * toward -z to a landing with the door in the back wall, enclosed like the
+   * stairs. Same footprint as 'stairs', so it fits anywhere a stairwell does.
+   */
+  buildEscalatorGoal(P, wall, glow) {
+    const R = this.opts.rise || 3.2, n = Math.max(12, Math.round(R / 0.2)), SL = 7.6, run = SL / n, zNear = -1.6 + SL, WH = 3.4;
+    const hw = 0.8, wt = 0.2, dw = 0.5;
+    this.stairLen = zNear;
+    // landing plate at the foot, the steps (colliders that carry you), balustrades, handrails
+    this.box('metal_grey', -hw, 0, zNear, hw, 0.06, zNear + 0.9);
+    this.box('hazard', -hw + 0.1, 0.06, zNear, hw - 0.1, 0.065, zNear + 0.12);
+    const speed = this.opts.speed ?? 0.7, c = Math.cos(this.rot), sn = Math.sin(this.rot);
+    for (let k = 0; k < n; k++) {
+      const z1 = zNear - k * run, z0 = z1 - run, top = R * (k + 1) / n;
+      this.collider(-hw + 0.1, 0, z0, hw - 0.1, top, z1);
+      this.colliders[this.colliders.length - 1].carry = { belt: speed, dx: -sn, dz: -c };
+      for (const [a, b] of [[-hw - wt, -hw + 0.1], [hw - 0.1, hw + wt]]) { this.box(wall, a, 0, z0, b, top + 0.95, z1); this.collider(a, 0, z0, b, top + 0.95, z1); }
+    }
+    const L = Math.hypot(SL, R), ang = Math.atan2(R, SL);
+    for (const x of [-hw + 0.05, hw - 0.05]) this.add(xf(new THREE.BoxGeometry(0.1, 0.07, L), { x, y: R / 2 + 1.0, z: zNear - SL / 2, rx: ang }), 'rubber_black');
+    this.add(xf(new THREE.BoxGeometry(hw * 2 - 0.2, 0.06, L), { y: R / 2 - 0.28, z: zNear - SL / 2, rx: ang }), 'metal_dark');
+    // the moving treads: a row of plates that loop up the incline
+    P.treads = [];
+    for (let k = 0; k <= n; k++) { const t = this.box('steel', -hw + 0.12, -0.03, -run, hw - 0.12, 0, 0); P.treads.push(t); }
+    P.tread = { n, run, rise: R / n, zNear, speed };
+    // the landing, the walls round it and the door
+    this.box('metal_grey', -hw, 0, -3.4, hw, R, -1.6); this.collider(-hw, 0, -3.4, hw, R, -1.6);
+    for (const [a, b] of [[-hw - wt, -hw], [hw, hw + wt]]) { this.box(wall, a, 0, -3.4, b, R + WH, -1.6); this.collider(a, 0, -3.4, b, R + WH, -1.6); }
+    this.box(wall, -hw - wt, R + WH - 0.2, -3.4, hw + wt, R + WH, zNear + 0.9);
+    for (const [a, b] of [[-hw - wt, -dw], [dw, hw + wt]]) { this.box(wall, a, 0, -3.4, b, R + WH, -3.2); this.collider(a, 0, -3.4, b, R + WH, -3.2); }
+    this.box(wall, -dw, R + 2.17, -3.4, dw, R + WH, -3.2);
+    this.box('void_black', -dw, R, -3.4, dw, R + 2.17, -3.3);
+    this.box('metal_dark', -dw - 0.02, R, -3.4, -dw + 0.06, R + 2.25, -3.2);
+    this.box('metal_dark', dw - 0.06, R, -3.4, dw + 0.02, R + 2.25, -3.2);
+    P.portal = this.add(xf(new THREE.PlaneGeometry(1.0, 2.17), { y: R + 1.085, z: -3.29 }), glowMat('#fffdf2', { fog: false }));
+    P.portal.visible = false;
+    P.leaf = this.pivot(-dw + 0.03, R, -3.24);
+    this.box('metal_grey', 0, 0.005, -0.025, dw * 2 - 0.06, 2.16, 0.025, P.leaf);
+    this.box('chrome', 0.15, 1.0, 0.025, dw * 2 - 0.12, 1.05, 0.06, P.leaf);
+    this.glowSign('EXIT', glow, 0.55, 0.2, R + 2.35, -3.19);
+    this.collider(-dw, R, -3.4, dw, R + 2.2, -3.2);
   }
   /**
    * A narrow stair shaft: ONE stairwell, every flight of it. Two lanes of concrete
@@ -12839,6 +13336,12 @@ class Goal {
     for (const [a, b] of [[-half - wt, -doorW], [doorW, half + wt]]) this.collider(a, lintel, zOuter, b, roof, zOuter + wt);
     this.collider(-doorW, lintel, zOuter, doorW, yTop, zOuter + wt);
     this.collider(-doorW, yTop + 2.17, zOuter, doorW, roof, zOuter + wt);
+    if (this.opts.sealed) {
+      // a stairwell level starts inside the shaft: there is no way out at the bottom
+      this.box(wall, -half - wt, 0, zOuter, half + wt, lintel, zOuter + wt);
+      this.collider(-half - wt, 0, zOuter, half + wt, lintel, zOuter + wt);
+      this.glowSign('B1', glow, 0.4, 0.16, 2.0, zOuter - 0.01).rotation.y = Math.PI;
+    }
 
     // the flights: even ones climb down the left lane, odd ones back up the right
     for (let k = 0; k < F; k++) {
@@ -12872,12 +13375,38 @@ class Goal {
     this.box('chrome', 0.15, 1.0, 0.025, doorW * 2 - 0.12, 1.05, 0.06, P.leaf);
     const sign = this.glowSign('STAIRS', glow, 0.55, 0.2, yTop + 2.32, zOuter + 0.13);
     sign.rotation.y = Math.PI;
+    // doors off the stairwell on some landings: a floor to get off at (stage key exits)
+    this.exits = [];
+    this.foci = [];
+    for (const k of this.opts.exits || []) {
+      const j = Math.max(1, Math.min(F - 1, k | 0)) - 1;      // landing at the top of flight j
+      const atBack = j % 2 === 0, ly = (j + 1) * R, zf = atBack ? -zOuter + 0.01 : zOuter - 0.01, s = atBack ? 1 : -1;
+      const door = this.pivot(0, ly, zf);
+      if (!atBack) door.rotation.y = Math.PI;
+      this.box('metal_dark', -doorW - 0.06, 0, 0, -doorW, 2.25, 0.08, door);
+      this.box('metal_dark', doorW, 0, 0, doorW + 0.06, 2.25, 0.08, door);
+      this.box('metal_dark', -doorW - 0.06, 2.17, 0, doorW + 0.06, 2.25, 0.08, door);
+      const portal = this.add(xf(new THREE.PlaneGeometry(doorW * 2, 2.17), { y: 1.085, z: 0.005 }), glowMat('#fffdf2', { fog: false }), door);
+      portal.visible = false;
+      const leaf = this.pivot(-doorW + 0.02, 0, 0.04, door);
+      this.box('metal_grey', 0, 0.005, -0.02, doorW * 2 - 0.04, 2.16, 0.02, leaf);
+      this.box('chrome', 0.15, 1.0, 0.02, doorW * 2 - 0.12, 1.05, 0.05, leaf);
+      const fs = this.add(new THREE.PlaneGeometry(0.6, 0.18), glowMat('#ffffff', { map: signTex('FLOOR ' + (j + 2), glow) }), door);
+      fs.position.set(0, 2.42, 0.03);
+      this.exits.push({ leaf, portal, y: ly, floor: j + 2, z: zf + s * 0.35, local: new THREE.Vector3(0, ly + 1.1, zf + s * 0.35) });
+    }
     // the roof of the shaft: the climb is enclosed all the way to the top door
     this.box('concrete', -half - wt, roof, -zOuter - wt, half + wt, roof + 0.3, zOuter + wt);
     this.collider(-half - wt, roof, -zOuter - wt, half + wt, roof + 0.3, zOuter + wt);
     this.collider(-doorW, yTop, zOuter, doorW, yTop + 2.2, zOuter + 0.1);
   }
 
+
+  /** Where to stand to use landing door i of a stairwell (world space). */
+  exitFocus(i) {
+    this.group.updateMatrixWorld(true);
+    return this.group.localToWorld(new THREE.Vector3().copy(this.exits[i].local));
+  }
 
   get focus() {
     const t = this.type;
@@ -12892,7 +13421,8 @@ class Goal {
     else if (t === 'keypad') { ly = 1.3; lz = 0.2; }
     else if (t === 'portal_window') { ly = 1.5; lz = 0.4; }
     else if (t === 'musicbox') { ly = 0.9; lz = 0.25; }
-    else if (t === 'slide') { ly = 3.0 + 1.45; lz = 0.7; }
+    else if (t === 'slide') { ly = 0.9; lz = 0.85; }
+    else if (t === 'escalator') { ly = (this.opts.rise || 3.2) + 1.6; lz = -3.15; }
     else if (t === 'stairs') { ly = (this.opts.rise || 3) + 1.6; lz = -3.15; }
     else if (t === 'stairshaft') { ly = (this.opts.rise || 2.8) * Math.max(2, 2 * Math.round((this.opts.flights || 6) / 2)) + 1.7; lz = 4.0; }
     else if (t === 'valve') { ly = 1.2; lz = 0.45; }
@@ -12917,6 +13447,20 @@ class Goal {
       const L = this.game.world.sampleLight(this.x, this.y + 1.2, this.z);
       const k = this.game.lights.globalDim;
       setLight(this.mats, L[0] * k + 0.004, L[1] * k + 0.004, L[2] * k + 0.004);
+      // spray paint and the throat are unlit materials: fluorescent paint, so it never quite goes black
+      if (this.paintMats) {
+        const v = (x) => Math.min(1, 0.32 + x * k * 2.2);
+        this.paintMats[0].color.setRGB(v(L[0]), v(L[1]), v(L[2]));
+        this.paintMats[1].color.setRGB(Math.min(1, 0.2 + L[0] * k * 2), Math.min(1, 0.2 + L[1] * k * 2), Math.min(1, 0.2 + L[2] * k * 2));
+      }
+    }
+    if (this.parts.tread) {
+      const T = this.parts.tread, u = (((performance.now() * 0.001 * T.speed) / T.run) % 1 + 1) % 1;
+      for (let k = 0; k < this.parts.treads.length; k++) {
+        const f = k - 1 + u, tr = this.parts.treads[k];
+        tr.visible = f >= 0 && f <= T.n - 1;
+        tr.position.set(0, (f + 1) * T.rise, T.zNear - f * T.run);
+      }
     }
     const P = this.parts, now = performance.now() * 0.001;
     if (P.flames && this.state === 'idle') for (const f of P.flames) f.scale.set(1, 0.8 + Math.random() * 0.5, 1);
@@ -12935,6 +13479,7 @@ class Goal {
     const k = a.kind;
     let fireAt = 0.6;
     if (k === 'open_door') { P.leaf.rotation.y = -1.7 * smooth(e(1.0)); P.portal.visible = true; fireAt = 0.9; }
+    else if (k === 'open_exit') { const X = this.exits[this.exitIdx]; X.leaf.rotation.y = -1.7 * smooth(e(1.0)); X.portal.visible = true; fireAt = 0.9; }
     else if (k === 'call') { P.led.material.color.set('#ffb030'); fireAt = 0.2; }
     else if (k === 'elev_open') { P.l.position.x = -0.78 * smooth(e(1.4)); P.r.position.x = 0.78 * smooth(e(1.4)); P.portal.visible = true; fireAt = 1.3; }
     else if (k === 'shutter') { P.leaf.position.y = 2.3 * smooth(e(1.6)); P.leaf.scale.y = 1 - 0.9 * smooth(e(1.6)); P.portal.visible = true; fireAt = 1.4; }
@@ -12988,6 +13533,7 @@ function smooth(t) { return t * t * (3 - 2 * t); }
 
 __e['Goal'] = Goal;
 __e['GOAL_INFO'] = GOAL_INFO;
+__e['SLIDE_MARKS'] = SLIDE_MARKS;
 __e['GOAL_ELLIPSOID'] = ellipsoid;
   return __e;
 })();
@@ -12997,12 +13543,14 @@ const { RNG: RNG, hash32: hash32 } = __mod['src/core/rng.js'];
 const { EDGE: EDGE } = __mod['src/world/world.js'];
 const { FLICKER: FLICKER } = __mod['src/world/lights.js'];
 const { wallSlots: wallSlots, spaceFree: spaceFree } = __mod['src/world/props.js'];
-const { Goal: Goal, GOAL_INFO: GOAL_INFO } = __mod['src/game/goals.js'];
+const { Goal: Goal, GOAL_INFO: GOAL_INFO, SLIDE_MARKS: SLIDE_MARKS } = __mod['src/game/goals.js'];
 // Level objectives: places every stage's goal objects when the level loads,
 // tracks progress, runs stage effects (power cuts, rage, alarms, spawns),
 // feeds the HUD compass and rolls back timed stages when the player dies.
 
 const TAU = Math.PI * 2;
+/** Goals that take you somewhere: using one is a checkpoint, and at the end of a level it can carry you on (stage key next). */
+const TRANSPORTS = new Set(['elevator', 'stairs', 'stairshaft', 'escalator', 'slide', 'door_stairs', 'hatch']);
 
 class Objectives {
   constructor(game) {
@@ -13019,6 +13567,7 @@ class Objectives {
   clear() {
     for (const g of this.goals) g.dispose();
     this.goals = [];
+    this.shortcut = null;
     this.clues = [];
     this.stages = [];
     if (this.game.world) this.game.world.cuts = [];
@@ -13029,6 +13578,7 @@ class Objectives {
   setup(level) {
     this.clear();
     this.level = level;
+    this.spawnYaw = undefined;
     const rng = new RNG(hash32(level.seed, 0x0b1e));
     const sp = level.spawn || [16, 16];
     const base = rng.next() * TAU;
@@ -13049,11 +13599,29 @@ class Objectives {
         for (let k = 0; k < count; k++) extra.push({ color: cols[k % cols.length] });
       }
       if (def.pickSafe) {
+        // the slides of a row and the paint round them. One clue note tells you which
+        // mouth lets you live; everything else painted there is there to mislead you.
         const right = rng.int(0, count - 1);
-        for (let k = 0; k < count; k++) extra.push({ num: k + 1, hue: k + i, safe: k === right, len: def.slideLen || 8 });
+        const form = def.clue || rng.pick(['mark', 'noface', 'arrows']);
+        const marks = SLIDE_MARKS.slice(); rng.shuffle(marks);
+        const counts = Array.from({ length: count }, (_, k) => k); rng.shuffle(counts);
+        const faces = ['grin', 'eyes', 'smile'];
+        const bad = def.endings && def.endings.length ? def.endings : ['jaws', 'grinder', 'whirlpool', 'drop'];
+        st.puzzle = { form, mark: marks[right], arrows: form === 'arrows' ? counts[right] : 0 };
+        for (let k = 0; k < count; k++) {
+          const safe = k === right;
+          extra.push({
+            num: k + 1, hue: k + i, safe, len: def.slideLen || 8, seed: rng.int(1, 2 ** 30),
+            mark: form === 'mark' || rng.chance(0.5) ? marks[k] : null,
+            face: form === 'noface' ? (safe ? null : rng.pick(faces)) : (rng.chance(0.45) ? rng.pick(faces) : null),
+            arrows: form === 'arrows' ? counts[k] : rng.int(0, 2),
+            ending: safe ? rng.pick(['door', 'lobby', 'hatch']) : rng.pick(bad),
+          });
+        }
       }
+      if (def.goal === 'escalator') for (let k = 0; k < count; k++) extra.push({ rise: def.rise || 3.2, hue: i });
       if (def.goal === 'stairs') for (let k = 0; k < count; k++) extra.push({ rise: def.rise || 3, hue: i });
-      if (def.goal === 'stairshaft') for (let k = 0; k < count; k++) extra.push({ rise: def.rise || 2.8, flights: def.flights || 6, hue: i });
+      if (def.goal === 'stairshaft') for (let k = 0; k < count; k++) extra.push({ rise: def.rise || 2.8, flights: def.flights || 6, hue: i, exits: def.exits || [] });
       if (def.choose) {
         const others = ['pool', 'red', 'forest', 'void'].filter((v) => v !== def.choose);
         rng.shuffle(others);
@@ -13065,14 +13633,19 @@ class Objectives {
           // slides stand together in a row; every other kind of target is spread round the circle
           const a = def.angle ?? (def.pickSafe ? base + i * 2.2 : base + i * 2.2 + (k * TAU) / count + rng.range(-0.35, 0.35));
           const d = def.pickSafe ? (st.slideD || (st.slideD = rng.range(def.dist[0], def.dist[1]))) : rng.range(def.dist[0], def.dist[1]);
-          const g = this.place(def.goal, from[0] + Math.cos(a) * d, from[1] + Math.sin(a) * d, from, rng, extra[k] || {});
+          const tx = from[0] + Math.cos(a) * d, tz = from[1] + Math.sin(a) * d;
+          let g = null;
+          if (def.atSpawn && k === 0) g = this.placeAtSpawn(def.goal, sp, extra[k] || {});
+          else if (def.floor !== undefined && this.world.gen && this.world.gen.floors) g = this.placeOnFloor(def.goal, def.floor, tx, tz, extra[k] || {});
+          else g = this.place(def.goal, tx, tz, from, rng, extra[k] || {});
           if (g) st.targets.push({ goal: g, x: g.x, z: g.z, done: false, ...(extra[k] || {}) });
         }
       } else if (def.item) {
         for (let k = 0; k < count; k++) {
           const a = base + i * 2.2 + (k * TAU) / count + rng.range(-0.4, 0.4);
           const d = rng.range(def.dist[0], def.dist[1]);
-          items.push({ item: def.item, x: from[0] + Math.cos(a) * d, z: from[1] + Math.sin(a) * d, stage: i });
+          const [ix, iz] = this.inBounds(from[0] + Math.cos(a) * d, from[1] + Math.sin(a) * d);
+          items.push({ item: def.item, x: ix, z: iz, stage: i });
         }
       } else if (def.reuse) {
         const p = this.stages[i - 1].def.reuse ? null : this.stages.slice(0, i).reverse().find((s) => s.targets.some((t) => t.goal));
@@ -13081,11 +13654,24 @@ class Objectives {
       if (st.targets.length) prev = [st.targets[0].x, st.targets[0].z];
       // clue notes scattered around where the stage starts
       for (const text of this.clueTexts(st, rng)) {
-        const a = rng.next() * TAU, d = rng.range((def.clueDist || [8, 34])[0], (def.clueDist || [8, 34])[1]);
+        const cd = def.clueDist || (def.pickSafe ? [5, 18] : [8, 34]);
+        const a = rng.next() * TAU, d = rng.range(cd[0], cd[1]);
         const g = this.place('note', from[0] + Math.cos(a) * d, from[1] + Math.sin(a) * d, from, rng, {});
         if (g) { g.text = text; g.title = def.clueTitle || 'A note'; st.clues.push(g); this.clues.push(g); }
       }
     });
+    // a level you can climb on top of has a way out up there: a roof hatch, the shortcut
+    const gp = this.world.gen && this.world.gen.params;
+    if (gp && gp.ceilingWalk && this.world.gen.floors) {
+      const fl = this.world.gen.floors, S = this.world.S;
+      for (let tries = 0; tries < 40 && !this.shortcut; tries++) {
+        const a = rng.next() * TAU, d = rng.range(26, 44);
+        const x = (Math.floor((sp[0] + Math.cos(a) * d) / S) + 0.5) * S, z = (Math.floor((sp[1] + Math.sin(a) * d) / S) + 0.5) * S;
+        this.world.getLayout(this.world.chunkOf(x), this.world.chunkOf(z));
+        if (!fl.slab(x, z, 1) || this.world.groundAt(x, z) < -1 || !this.goals.every((g) => Math.hypot(g.x - x, g.z - z) > 4)) continue;
+        this.shortcut = this.makeGoal('hatch', x, z, 0, {}, fl.y(1) + 0.06);
+      }
+    }
     return items;
   }
 
@@ -13111,6 +13697,21 @@ class Objectives {
     if (def.choose) {
       out.push(def.chooseClue || 'Every open window shows somewhere else.\nThe way home is yellow, and it hums.');
     }
+    if (def.pickSafe && st.puzzle) {
+      const pz = st.puzzle;
+      if (pz.form === 'mark') out.push(rng.pick([
+        `Written on the back of a ride ticket:\n"The arrows are lies. The faces are lies.\nGo in under the ${pz.mark}."`,
+        `Scratched into a bench:\n${pz.mark.toUpperCase()} = HOME\nevery other hole is hungry`,
+      ]));
+      else if (pz.form === 'noface') out.push(rng.pick([
+        `A lifeguard's note, soaked through:\n"They paint a face beside every slide that eats you.\nTake the one nobody has drawn on."`,
+        `In marker, on a napkin:\n"no face = no teeth.\ndon't trust the arrows"`,
+      ]));
+      else out.push(rng.pick([
+        `Someone kept count:\n"Ignore the pictures. Count the arrows pointing at the hole.\nThe one that lets you out has ${pz.arrows}."`,
+        `Torn from a park map:\n"${pz.arrows} arrow${pz.arrows === 1 ? '' : 's'}. Not more, not less. The rest go into the dark."`,
+      ]));
+    }
     for (const t of def.clues || []) out.push(t);
     return out;
   }
@@ -13125,9 +13726,9 @@ class Objectives {
   /** Stairwells and slide towers are long: they need a clear rectangle, and the ceiling above them is cut away. */
   placeBig(type, cx, cz, from, opts) {
     const w = this.world, S = w.S, sp = this.level.spawn || [16, 16];
-    const lens = type === 'stairshaft' ? [0] : (type === 'slide' ? [opts.len || 8, 5, 3] : [0]);
+    const lens = [0];
     for (const len of lens) {
-      const rect = type === 'stairshaft' ? [-1.4, 1.4, -4.4, 4.4] : (type === 'slide' ? [-1.5, 1.5, -(len + 1.4), 6.0] : [-1.6, 1.6, -3.6, 7.0]);
+      const rect = type === 'stairshaft' ? [-1.4, 1.4, -4.4, 4.4] : [-1.6, 1.6, -3.6, 7.0];
       const g0x = Math.floor(cx / S), g0z = Math.floor(cz / S);
       for (let r = 0; r < 18; r++) for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
@@ -13158,14 +13759,53 @@ class Objectives {
     return true;
   }
 
+  /** A level that is one building (a mall, a block of flats) keeps its goals inside its walls. */
+  inBounds(x, z) {
+    const b = this.world.gen && this.world.gen.bounds;
+    if (!b) return [x, z];
+    return [Math.max(b[0] + 3, Math.min(b[2] - 3, x)), Math.max(b[1] + 3, Math.min(b[3] - 3, z))];
+  }
+
+  /**
+   * A goal on one floor of a multi-storey level. The generator lists, per floor, the
+   * walls a goal can hang on (shop piers and corridor walls facing the gallery, the
+   * back walls inside) and the open spots inside the units.
+   */
+  placeOnFloor(type, floor, cx, cz, opts = {}) {
+    const fl = this.world.gen.floors, info = GOAL_INFO[type];
+    const f = Math.max(0, Math.min(fl.count - 1, floor | 0)), y = fl.y(f);
+    [cx, cz] = this.inBounds(cx, cz);
+    const far = (s) => this.goals.every((g) => Math.abs(g.y - y) > 1 || Math.hypot(g.x - s.x, g.z - s.z) > 4);
+    const near = (a, b) => Math.hypot(a.x - cx, a.z - cz) - Math.hypot(b.x - cx, b.z - cz);
+    if (info.wall) {
+      // exits and big doors go on the outside wall (inside a shop); panels anywhere
+      const outer = type.startsWith('door') || type === 'elevator';
+      const slots = fl.slots(f).filter(far).sort(near);
+      const pick = slots.find((s) => !outer || s.inside) || slots[0];
+      if (pick) return this.makeGoal(type, pick.x + pick.nx * 0.081, pick.z + pick.nz * 0.081, Math.atan2(pick.nx, pick.nz), opts, y);
+    }
+    const spots = fl.spots(f).filter(far).sort(near);
+    if (spots.length) return this.makeGoal(type, spots[0].x, spots[0].z, spots[0].rot + Math.PI, opts, y);
+    return null;
+  }
+
+  /** A stairwell level: the shaft stands round the spawn, so the level starts at the foot of the stairs. */
+  placeAtSpawn(type, sp, opts = {}) {
+    if (type !== 'stairshaft') return null;
+    // the bottom landing of the shaft is at local (0, +3.25): put the spawn there, facing the first flight
+    this.spawnYaw = 0;
+    return this.makeGoal(type, sp[0], sp[1] - 3.25, 0, { ...opts, sealed: true });
+  }
+
   place(type, cx, cz, from, rng, opts = {}) {
     let info = GOAL_INFO[type];
+    [cx, cz] = this.inBounds(cx, cz);
     const w = this.world, S = w.S;
     const others = this.goals;
     const farFromOthers = (x, z) => others.every((g) => Math.hypot(g.x - x, g.z - z) > 6);
     const sp = this.level.spawn || [16, 16];
     if (type === 'note') return this.placeNote(cx, cz, rng, farFromOthers, sp, opts);
-    if (info.big) { const big = this.placeBig(type, cx, cz, from, opts); if (big) return big; if (type === 'slide') return null; type = 'door_stairs'; info = GOAL_INFO[type]; }
+    if (info.big) { const big = this.placeBig(type, cx, cz, from, opts); if (big) return big; type = 'door_stairs'; info = GOAL_INFO[type]; }
     if (info.wall) {
       const wide = type === 'door_shutter' || type === 'elevator';
       const slots = [];
@@ -13216,7 +13856,8 @@ class Objectives {
         if (!spaceFree(w, x, z, need, 0.05, 2.2)) continue;
         if (type === 'cabin' && !spaceFree(w, x, z + 1.8, 1.0)) continue;
         const face = Math.round(Math.atan2(from[0] - x, from[1] - z) / (Math.PI / 2)) * (Math.PI / 2);
-        return this.makeGoal(type, x, z, type === 'note' ? rng.range(0, TAU) : face, opts);
+        // a slide with no wall to sit in brings a stretch of wall with it
+        return this.makeGoal(type, x, z, type === 'note' ? rng.range(0, TAU) : face, type === 'slide' ? { ...opts, freestanding: true } : opts);
       }
     }
     return null;
@@ -13237,13 +13878,13 @@ class Objectives {
     return null;
   }
 
-  makeGoal(type, x, z, rot, opts = {}) {
-    const g = new Goal(this.game, type, x, this.world.groundAt(x, z), z, rot, opts);
+  makeGoal(type, x, z, rot, opts = {}, y = null) {
+    const g = new Goal(this.game, type, x, y ?? this.world.groundAt(x, z), z, rot, opts);
     this.goals.push(g);
     const info = GOAL_INFO[type];
     const f = g.focus;
     if (type === 'lantern') {
-      g.fixture = this.world.addExtraFixture({ x: f.x, y: 1.3, z: f.z, type: 'bulb', emit: 'omni', frame: false, color: [1.0, 0.68, 0.36], intensity: 2.2, flicker: FLICKER.OFF, soft: 0.6, range: 13 });
+      g.fixture = this.world.addExtraFixture({ x: f.x, y: g.y + 1.3, z: f.z, type: 'bulb', emit: 'omni', frame: false, color: [1.0, 0.68, 0.36], intensity: 2.2, flicker: FLICKER.OFF, soft: 0.6, range: 13 });
     } else if (type === 'stairs') {
       const R = opts.rise || 3, c = Math.cos(rot), sn = Math.sin(rot);
       for (const [lz, ly] of [[-2.2, R + 2.7], [2.0, R * 0.55 + 3.0], [5.2, R * 0.1 + 3.0]]) this.world.addExtraFixture({ x: x + lz * sn, y: g.y + ly, z: z + lz * c, type: 'bulb', emit: 'omni', frame: false, color: [1.0, 0.95, 0.82], intensity: 1.6, flicker: FLICKER.STEADY, soft: 0.6, range: 9 });
@@ -13253,13 +13894,16 @@ class Objectives {
         const lz = k % 2 === 0 ? -3.9 : 3.9;
         this.world.addExtraFixture({ x: x + lz * sn, y: g.y + k * R + 1.15, z: z + lz * c, type: 'bulb', emit: 'omni', frame: false, color: [1.0, 0.95, 0.86], intensity: 1.5, flicker: FLICKER.STEADY, soft: 0.6, range: 8 });
       }
+    } else if (type === 'escalator') {
+      const R = opts.rise || 3.2, c = Math.cos(rot), sn = Math.sin(rot);
+      for (const [lz, ly] of [[-2.2, R + 2.7], [2.0, R * 0.55 + 2.6], [5.6, 2.6]]) this.world.addExtraFixture({ x: x + lz * sn, y: g.y + ly, z: z + lz * c, type: 'bulb', emit: 'omni', frame: false, color: [0.92, 0.96, 1.0], intensity: 1.6, flicker: FLICKER.STEADY, soft: 0.6, range: 9 });
     } else if (type === 'slide') {
       const c = Math.cos(rot), sn = Math.sin(rot);
-      this.world.addExtraFixture({ x: x + 1.2 * sn, y: g.y + 5.0, z: z + 1.2 * c, type: 'bulb', emit: 'omni', frame: false, color: [0.8, 0.95, 1.0], intensity: 1.5, flicker: FLICKER.STEADY, soft: 0.6, range: 10 });
+      this.world.addExtraFixture({ x: x + 1.4 * sn, y: g.y + 2.3, z: z + 1.4 * c, type: 'bulb', emit: 'omni', frame: false, color: [0.8, 0.95, 1.0], intensity: 0.9, flicker: FLICKER.STEADY, soft: 0.6, range: 7 });
     } else if (type.startsWith('door') || type === 'elevator' || type === 'hatch' || type === 'cabin') {
       const hex = parseInt(info.color.slice(1), 16);
       const col = [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
-      this.world.addExtraFixture({ x: f.x, y: type === 'hatch' ? 0.6 : 2.4, z: f.z, type: 'bulb', emit: 'omni', frame: false, color: col, intensity: 0.9, flicker: FLICKER.STEADY, soft: 0.6, range: 8 });
+      this.world.addExtraFixture({ x: f.x, y: g.y + (type === 'hatch' ? 0.6 : 2.4), z: f.z, type: 'bulb', emit: 'omni', frame: false, color: col, intensity: 0.9, flicker: FLICKER.STEADY, soft: 0.6, range: 8 });
     }
     return g;
   }
@@ -13296,6 +13940,12 @@ class Objectives {
   targetDone(t) {
     if (t.done) return;
     t.done = true;
+    // elevators, stairs, escalators and slides are checkpoints: die after one and you start again there
+    const st0 = this.stage;
+    if (t.goal && TRANSPORTS.has(t.goal.type) && st0 && st0.targets.includes(t) && !st0.def.final && st0.def.checkpoint !== false) {
+      const pl = this.game.player;
+      this.game.setCheckpoint(pl.pos.x, pl.pos.y, pl.pos.z, pl.yaw, 'Checkpoint');
+    }
     if (this.game.phobia) this.game.phobia.onGoal(t);
     this.game.bus.emit('goal', t);
     const st = this.stage;
@@ -13312,7 +13962,7 @@ class Objectives {
     const st = this.stage;
     st.done = true;
     if (st.def.effects) this.run(st.def.effects);
-    if (st.def.final) { this.finished = true; this.game.levelComplete(); return; }
+    if (st.def.final) { this.finished = true; this.game.levelComplete(st.def.next || null); return; }
     this.index++;
     this.beginStage();
     const next = this.stage;
@@ -13344,6 +13994,14 @@ class Objectives {
 
   // ------------------------------------------------------------ interaction
   candidates(px, pz, out) {
+    const sc = this.shortcut;
+    if (sc && !this.finished && sc.state !== 'done' && Math.abs(sc.x - px) < 3 && Math.abs(sc.z - pz) < 3) {
+      const f = sc.focus;
+      out.push({ x: f.x, y: f.y, z: f.z, text: 'Climb out through the roof hatch', use: () => {
+        sc.state = 'done'; this.game.audio.door('hatch');
+        sc.play('hatch', () => { if (this.finished) return; this.finished = true; this.game.bus.emit('shortcut'); this.game.levelComplete(); });
+      } });
+    }
     for (const g of this.clues || []) {
       if (Math.abs(g.x - px) > 3 || Math.abs(g.z - pz) > 3) continue;
       const f = g.focus;
@@ -13368,6 +14026,14 @@ class Objectives {
         if (this.stage && this.stage.def.survive) {
           out.push({ x: f.x, y: f.y, z: f.z, text: 'The elevator is on its way…', use: () => this.game.audio.locked() });
           continue;
+        }
+        // a stairwell's landing doors: any of them is a way out
+        if (g.exits && g.exits.length && si === this.index) {
+          for (let i = 0; i < g.exits.length; i++) {
+            const p = g.exitFocus(i);
+            if (Math.abs(p.y - this.game.player.pos.y - 1.1) > 1.6) continue;
+            out.push({ x: p.x, y: p.y, z: p.z, text: `Leave the stairwell at floor ${g.exits[i].floor}`, use: () => { g.pendingExit = i; this.use(t); } });
+          }
         }
         let text = g.info.prompt;
         if (g.type === 'elevator') {
@@ -13431,7 +14097,7 @@ class Objectives {
     if (g.type === 'slide') {
       if (this.game.rideLock) return;
       g.play('ride');
-      this.game.ride(g, !!t.safe, st.def.rideTime || 9, () => { for (const x of st.targets) x.done = true; t.done = false; this.targetDone(t); });
+      this.game.ride(g, !!t.safe, st.def.rideTime || 9, () => { for (const x of st.targets) x.done = true; t.done = false; this.targetDone(t); }, t.ending || (t.safe ? 'door' : 'drop'));
       return;
     }
     switch (g.type) {
@@ -13441,7 +14107,10 @@ class Objectives {
         if (st.def.final) setTimeout(() => this.openElevator(g), 2600);
         else done();
         return;
-      case 'door_exit': case 'door_stairs': case 'door_security': case 'door_final': case 'stairs': case 'stairshaft':
+      case 'stairshaft':
+        g.exitIdx = g.pendingExit ?? -1; g.pendingExit = undefined;
+        g.state = 'done'; a.door('door'); g.play(g.exitIdx >= 0 ? 'open_exit' : 'open_door', done); return;
+      case 'door_exit': case 'door_stairs': case 'door_security': case 'door_final': case 'stairs': case 'escalator':
         g.state = 'done'; a.door('door'); g.play('open_door', done); return;
       case 'door_shutter': g.state = 'done'; a.door('shutter'); g.play('shutter', done); return;
       case 'hatch': g.state = 'done'; a.door('hatch'); g.play('hatch', done); return;
@@ -13507,10 +14176,8 @@ class Objectives {
   onDeath() {
     const st = this.stage;
     if (!st || this.finished) return;
-    if (st.def.pickSafe && st.targets.length) {
-      const right = Math.floor(Math.random() * st.targets.length);
-      st.targets.forEach((t, k) => { t.safe = k === right; t.done = false; });
-    }
+    // a row of slides keeps its answer: the paint and the clue note still point the same way
+    if (st.def.pickSafe && st.targets.length) st.targets.forEach((t) => { t.done = false; });
     if (st.def.revert && this.index > 0) {
       for (const t of st.targets) { t.done = false; if (t.goal && !st.def.reuse) t.goal.resetVisual(); }
       this.index--;
@@ -15196,7 +15863,7 @@ function makeForestGen(p = {}) {
       if (P.props) placeProps(world, l, rng, P.props, P, 0);
     },
 
-    build(world, l, b) {
+    build(world, l, b, ctx) {
       const N = world.N, S = world.S;
       for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
         if (l.void && l.void[i + j * N]) continue;     // the cut: no ground to stand on
@@ -15218,7 +15885,7 @@ function makeForestGen(p = {}) {
         b.box('metal_dark', x - 0.14, 3.0, z - 0.14, x + 0.14, 3.04, z + 0.14, {});
         b.box('fixture_bulb', x - 0.09, 3.04, z - 0.09, x + 0.09, 3.2, z + 0.09, { slot: l.fixtures[l.fixtures.length - 1].slot });
       }
-      buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)));
+      buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)), world, ctx);
     },
 
     ao(world, l, x, y, z, nx, ny) {
@@ -15979,7 +16646,7 @@ function placeFeatures(world, l, rng, P) {
 function buildFeatures(world, l, b, ctx, P) {
   const H = (P && P.height) || 2.75;
   // every prop placed by the level generator or by a feature above
-  buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)));
+  buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)), world, ctx);
 
   for (const f of l.features || []) {
     if (f.kind === 'pool') { if (f.deep) buildDeepPool(b, f); else buildPool(b, f); }
@@ -16420,6 +17087,131 @@ function buildCutEdges(world, l, b, P, H) {
   }
 }
 
+// ---------------------------------------------------------------- painted maps
+/**
+ * gen.params.layout: rows of characters, one per 2 m cell from the world origin
+ * (row = z cell, column = x cell), painted in the level studio's map:
+ *   #  solid - a block of wall    .  S  open floor    ?  (or anything else) the generator decides
+ * A wall goes wherever a solid cell meets one that is not solid; open cells next to
+ * each other are joined. Returns the solid cells of this chunk (or null if none).
+ */
+function applyLayout(world, l, rows) {
+  const N = world.N, S = world.S;
+  const at = (gx, gz) => (gz >= 0 && gz < rows.length && gx >= 0 && gx < rows[gz].length ? rows[gz][gx] : '?');
+  const solid = (c) => c === '#', open = (c) => c === '.' || c === 'S';
+  let any = false;
+  const out = new Uint8Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const gx = l.gx0 + i, gz = l.gz0 + j, c = at(gx, gz);
+    if (solid(c)) { out[i + j * N] = 1; any = true; }
+    // the west edge of this cell (V) and its north edge (H)
+    for (const [e, o] of [['V', at(gx - 1, gz)], ['H', at(gx, gz - 1)]]) {
+      let v = null;
+      if (solid(c) !== solid(o)) v = solid(c) || solid(o) ? EDGE.WALL : null;
+      else if (solid(c) && solid(o)) v = EDGE.OPEN;          // inside a block: no walls in the walls
+      else if (open(c) && open(o)) v = EDGE.OPEN;
+      if (v === null) continue;
+      if (e === 'V') setV(world, l, i, j, v); else setH(world, l, i, j, v);
+    }
+  }
+  if (!any) return null;
+  // nothing walks into, spawns in or hides loot in a solid block
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) if (out[i + j * N]) {
+    l.colliders.add(makeCollider((l.gx0 + i) * S, -1, (l.gz0 + j) * S, (l.gx0 + i + 1) * S, 3, (l.gz0 + j + 1) * S, C.NAVBLOCK));
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- walking on the ceiling
+// Corrupted levels (gen.params.ceilingWalk): near the spawn the ceiling has fallen in
+// over a heap of rubble you can climb, and the top of the ceiling holds your weight.
+// Up there it is dark, quiet, and nothing below can follow - and somewhere across it
+// is a roof hatch: a shortcut out of the level (see Objectives.setup).
+function breachRect(world, P) {
+  const sp = (world.level && world.level.spawn) || [16, 16];
+  const S = world.S, gx = Math.floor(sp[0] / S) + 2, gz = Math.floor(sp[1] / S) - 3;
+  return { gx, gz, w: 3, x0: gx * S, z0: gz * S, x1: (gx + 3) * S, z1: (gz + 1) * S };
+}
+function inBreach(world, x, z) {
+  const r = breachRect(world, world.gen.params);
+  return x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1;
+}
+/** The cells under the breach are open floor, all the way along (before the walls are made solid). */
+function openBreach(world, l, P) {
+  const N = world.N, br = breachRect(world, P);
+  for (let k = 0; k < br.w; k++) {
+    const i = br.gx + k - l.gx0, j = br.gz - l.gz0;
+    if (i < 0 || j < 0 || i >= N || j >= N) continue;
+    setV(world, l, i, j, EDGE.OPEN); setV(world, l, i + 1, j, EDGE.OPEN);
+    setH(world, l, i, j, EDGE.OPEN); setH(world, l, i, j + 1, EDGE.OPEN);
+  }
+}
+function layoutCeilingWalk(world, l, rng, P, blocked) {
+  const N = world.N, S = world.S, H = P.height, br = breachRect(world, P);
+  const cells = new Set();
+  for (let k = 0; k < br.w; k++) {
+    const gx = br.gx + k, gz = br.gz, i = gx - l.gx0, j = gz - l.gz0;
+    if (i < 0 || j < 0 || i >= N || j >= N) continue;
+    cells.add(i + j * N);
+  }
+  if (cells.size) {
+    // a heap of rubble, ceiling tiles and a filing cabinet: steps up through the hole
+    const n = Math.ceil(H / 0.36), rise = H / n, run = (br.w * S - 0.6) / n;
+    const steps = [];
+    for (let k = 0; k < n; k++) {
+      const x0 = br.x0 + 0.3 + k * run, top = rise * (k + 1);
+      if (x0 < l.x0 || x0 >= l.x0 + l.size) continue;
+      steps.push([x0, top]);
+      l.colliders.add(makeCollider(x0, 0, br.z0 + 0.35, x0 + run + 0.02, top, br.z1 - 0.35, C.SOLID | C.PLATFORM));
+    }
+    l.breach = { cells, steps, run, rise, z0: br.z0 + 0.35, z1: br.z1 - 0.35 };
+  }
+  // the top of the ceiling: one thin slab per run of solid cells in each row
+  const H0 = H, top = H + 0.06;
+  for (let j = 0; j < N; j++) {
+    let i = 0;
+    while (i < N) {
+      const skip = (q) => cells.has(q + j * N) || (blocked && l.void && l.void[q + j * N]);
+      if (skip(i)) { i++; continue; }
+      let k = i; while (k < N && !skip(k)) k++;
+      l.colliders.add(makeCollider((l.gx0 + i) * S, H0, (l.gz0 + j) * S, (l.gx0 + k) * S, top, (l.gz0 + j + 1) * S, C.SOLID | C.PLATFORM));
+      i = k;
+    }
+  }
+  // a few work lamps left on up there
+  if (rng.chance(0.6)) {
+    const x = l.x0 + rng.range(4, l.size - 4), z = l.z0 + rng.range(4, l.size - 4);
+    l.fixtures.push({ x, y: top + 1.4, z, type: 'bulb', emit: 'omni', frame: false, color: [0.7, 0.85, 1.0], intensity: 1.2, flicker: rng.chance(0.3) ? FLICKER.BUZZ : FLICKER.STEADY, soft: 0.6, range: 12, roof: true });
+  }
+}
+function buildCeilingWalk(world, l, b, P) {
+  const N = world.N, S = world.S, top = P.height + 0.06;
+  // the upper side of the ceiling: dusty boards between the joists
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    if (l.void && l.void[i + j * N]) continue;
+    if (l.breach && l.breach.cells.has(i + j * N)) continue;
+    b.quad('concrete_dark', (l.gx0 + i) * S, top, (l.gz0 + j + 1) * S, S, 0, 0, 0, 0, -S, {});
+  }
+  for (let j = 0; j < N; j += 3) b.box('wood_dark', l.x0, top, (l.gz0 + j) * S - 0.06, l.x0 + l.size, top + 0.12, (l.gz0 + j) * S + 0.06, { faces: 1 | 2 | 4 | 16 | 32 });
+  for (const fx of l.fixtures) if (fx.roof) {
+    b.cylinder('metal_dark', fx.x, top, fx.z, 0.03, 1.3, { segments: 6 });
+    b.box('fixture_bulb', fx.x - 0.1, fx.y - 0.1, fx.z - 0.1, fx.x + 0.1, fx.y + 0.1, fx.z + 0.1, { slot: fx.slot, uv: 'unit' });
+  }
+  if (l.breach) {
+    const B = l.breach;
+    for (const [x0, h] of B.steps) {
+      b.box('concrete_dark', x0, 0, B.z0, x0 + B.run + 0.02, h, B.z1, {});
+      b.box('decal_crack', x0 + 0.02, h, B.z0 + 0.1, x0 + B.run - 0.02, h + 0.004, B.z1 - 0.1, { faces: 4, uv: 'unit' });
+    }
+    // broken ceiling tiles hanging at the edge of the hole
+    const r = breachRect(world, P);
+    for (let k = 0; k < 5; k++) {
+      const x = r.x0 + 0.4 + k * (r.x1 - r.x0 - 0.8) / 4;
+      b.quad(P.ceilMat, x, P.height - 0.02, r.z0, 0.5, -0.35, 0.1, 0, 0, 0.6, {});
+    }
+  }
+}
+
 function makeLobbyGen(p = {}) {
   const P = {
     height: 2.75,
@@ -16456,6 +17248,18 @@ function makeLobbyGen(p = {}) {
     params: P,
 
     init(world, level) {
+      if (P.ceilingWalk) {
+        // two floors: the level, and the top of its ceiling. Nothing down there climbs up.
+        const H = P.height;
+        this.floors = {
+          count: 2, storey: H, climb: false,
+          y: (f) => (f > 0 ? H : 0),
+          floorOf: (y) => (y > H - 0.6 ? 1 : 0),
+          slab: (x, z, f) => f === 0 || !inBreach(world, x, z),
+          dropTo: (x, z, f) => (f > 0 && inBreach(world, x, z) ? 0 : f),
+          slots: () => [], spots: () => [],
+        };
+      }
       if (!cutsOf(P)) return;
       this.sky = __mod['src/world/gen/open.js'].makeSky(level);
       world.scene.add(this.sky);
@@ -16532,13 +17336,16 @@ function makeLobbyGen(p = {}) {
           if (j > 5) setH(world, l, i, j, EDGE.OPEN);
         }
       }
+      // --- a painted map (the level studio's gen.params.layout) overrides the strokes
+      const painted = P.layout ? applyLayout(world, l, P.layout) : null;
+      if (P.ceilingWalk) openBreach(world, l, P);
       // --- the cuts: no floor, no ceiling, no walls, and nothing may path into them
-      let blocked = null;
+      let blocked = painted;
       if (cuts) {
         blocked = l.void = new Uint8Array(N * N);
         for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
           const gx = gx0 + i, gz = gz0 + j, v = isVoid(gx, gz);
-          if (v) blocked[i + j * N] = 1;
+          if (v || (painted && painted[i + j * N])) blocked[i + j * N] = 1;
           if (v || isVoid(gx - 1, gz)) l.V[i + j * N] = EDGE.OPEN;
           if (v || isVoid(gx, gz - 1)) l.H[i + j * N] = EDGE.OPEN;
         }
@@ -16621,6 +17428,7 @@ function makeLobbyGen(p = {}) {
         }
       }
 
+      if (P.ceilingWalk) layoutCeilingWalk(world, l, rng, P, blocked);
       placeProps(world, l, rng, P.props, P);
       placeFeatures(world, l, rng, P);
       placeWetness(world, l, rng, P);
@@ -16633,6 +17441,7 @@ function makeLobbyGen(p = {}) {
         floorMat: (gx, gz, i, j) => (l.void && l.void[i + j * N] ? null : P.floorMat),
         ceilMat: (gx, gz, i, j) => {
           if (l.void && l.void[i + j * N]) return null;
+          if (l.breach && l.breach.cells.has(i + j * N)) return null;
           const cuts = world.cuts;
           if (cuts) for (const c of cuts) if (gx * S < c[2] && (gx + 1) * S > c[0] && gz * S < c[3] && (gz + 1) * S > c[1]) return null;
           return P.ceilMat;
@@ -16662,6 +17471,7 @@ function makeLobbyGen(p = {}) {
       // fixtures flagged frame:false are not ceiling troffers (see features.js)
       for (const fx of l.fixtures) if (fx.frame !== false) buildTroffer(b, fx, H, P.frameMat, P.fixtureMat);
       buildFeatures(world, l, b, ctx, P);
+      if (P.ceilingWalk) buildCeilingWalk(world, l, b, P);
       buildCutEdges(world, l, b, P, H);
       buildWetness(world, l, b);
       // flooded levels (the Poolrooms): one sheet of water over every floor
@@ -16721,7 +17531,7 @@ const THREE = __mod['vendor/three/build/three.module.js'];
 const { makeCollider: makeCollider, C: C } = __mod['src/world/collision.js'];
 const { FLICKER: FLICKER } = __mod['src/world/lights.js'];
 const { fbm2: fbm2, hashf: hashf, RNG: RNG, hash32: hash32 } = __mod['src/core/rng.js'];
-const { addProp: addProp, addContainer: addContainer, buildProps: buildProps, spaceFree: spaceFree, placeProps: placeProps, PROP_SETS: PROP_SETS } = __mod['src/world/props.js'];
+const { addProp: addProp, addContainer: addContainer, buildProps: buildProps, spaceFree: spaceFree, placeProps: placeProps, PROP_SETS: PROP_SETS, propColliders: propColliders } = __mod['src/world/props.js'];
 const { buildTree: buildTree } = __mod['src/world/gen/forest.js'];
 const { placeOutdoorWetness: placeOutdoorWetness, buildWetness: buildWetness, plantCard: plantCard } = __mod['src/world/wetness.js'];
 // Open, non-maze levels. No wall grid at all: each 32 m chunk is a piece of a
@@ -16879,7 +17689,13 @@ function makeOpenGen(mode, p = {}) {
     params: P,
 
     init(world, level) {
-      if (mode === 'cave') return; // underground: no sky at all
+      if (mode === 'mall' || mode === 'apartment') {
+        // multi-storey: entities, goals and checkpoints ask which floor something is on
+        this.floors = bldFloors(world, P);
+        const B = bldPlan(world, P);
+        this.bounds = [0.4, 0.4, B.W - 0.4, B.W - 0.4];
+      }
+      if (mode === 'cave' || mode === 'stairwell') return; // underground / indoors: no sky at all
       this.sky = makeSky(level);
       world.scene.add(this.sky);
     },
@@ -16902,6 +17718,8 @@ function makeOpenGen(mode, p = {}) {
       else if (mode === 'courtyard') layoutCourtyard(world, l, rng, P);
       else if (mode === 'heights') layoutHeights(world, l, rng, P);
       else if (mode === 'lot') layoutLot(world, l, rng, P);
+      else if (mode === 'mall' || mode === 'apartment') { layoutBuilding(world, l, rng, P); return; }
+      else if (mode === 'stairwell') { l.puddles = []; l.drips = []; l.plants = []; l.moss = []; l.stains = []; return; }
       else layoutOcean(world, l, rng, P);
       // the level's furniture set, placed last so it avoids whatever the mode
       // just built. Out here the floor is not always at y = 0: the hills roll,
@@ -16913,7 +17731,7 @@ function makeOpenGen(mode, p = {}) {
       }
     },
 
-    build(world, l, b) {
+    build(world, l, b, ctx) {
       if (mode === 'suburbs') buildSuburbs(world, l, b, P);
       else if (mode === 'city') buildCity(world, l, b, P);
       else if (mode === 'field') buildField(world, l, b, P);
@@ -16922,9 +17740,11 @@ function makeOpenGen(mode, p = {}) {
       else if (mode === 'courtyard') buildCourtyard(world, l, b, P);
       else if (mode === 'heights') buildHeights(world, l, b, P);
       else if (mode === 'lot') buildLot(world, l, b, P);
+      else if (mode === 'mall' || mode === 'apartment') buildBuilding(world, l, b, P);
+      else if (mode === 'stairwell') buildStairwellGround(world, l, b, P);
       else buildOcean(world, l, b, P);
       for (const t of l.trees) buildTree(b, t);
-      buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)));
+      buildProps(l, b, (seed) => new RNG(hash32(seed >>> 0, 0x51ed, world.seed >>> 0)), world, ctx);
       buildWetness(world, l, b);
     },
 
@@ -16953,6 +17773,464 @@ function makeOpenGen(mode, p = {}) {
     },
   };
   return gen;
+}
+
+// ------------------------------------------------------------------ malls and apartment blocks
+// A real building, 3 to 6 storeys round an open atrium. Shops (or flats) line the
+// outside walls, with windows to the car park; a gallery runs round the atrium on
+// every floor behind a glass railing; escalators (or, in a block of flats, stairs)
+// climb across the atrium from floor to floor; a fountain plays at the bottom and
+// a skylight closes the top. The building stands at x, z in [0, W] (two chunks a
+// side for a mall); the chunks round it are its car park.
+//
+// The whole building is planned once (bldPlan) as world-space boxes, props and
+// lights; every chunk then clips its own share out of the plan, so walls, slabs
+// and the long escalators collide the same from either side of a chunk border.
+const BLD_STYLES = {
+  mall: {
+    W: 64, S1: 13, A0: 20, SH: 4.5, floors: 4, unit: [9, 13], climb: 0.58,
+    wall: 'drywall', pier: 'metal_white', gallery: 'terrazzo', ceil: 'ceiling_white', slab: 'concrete_painted', ground: 'marble_floor', outer: 'concrete',
+    rail: 'chrome', unitFloors: ['floor_tile', 'vct_school', 'laminate', 'carpet_office', 'wood_floor', 'terrazzo'],
+    unitWalls: ['drywall', 'drywall_grey', 'drywall_blue', 'drywall_peach', 'drywall_green', 'wall_tile'],
+    signs: ['paint_red', 'metal_blue', 'metal_yellow', 'metal_green', 'plastic_orange', 'paint_black', 'metal_white'],
+  },
+  apartment: {
+    W: 48, S1: 9, A0: 13, SH: 3.2, floors: 5, unit: [6, 8], climb: 0.72,
+    wall: 'plaster_old', pier: 'wood_dark', gallery: 'carpet_hotel', ceil: 'ceiling_dirty', slab: 'concrete', ground: 'floor_tile', outer: 'brick_red',
+    rail: 'metal_dark', unitFloors: ['wood_floor', 'carpet_hotel_blue', 'laminate', 'carpet_green', 'carpet_red'],
+    unitWalls: ['wallpaper_rose', 'wallpaper_blue', 'damask_green', 'drywall_peach', 'plaster_old', 'damask_hotel'],
+    signs: ['wood_dark'],
+  },
+};
+const BSOLID = C.SOLID | C.OCCLUDE, BGLASS = C.SOLID;
+
+function bldPlan(world, P) {
+  const key = (world.seed >>> 0) + ':' + world.levelSalt + ':' + P.mode;
+  if (world._bld && world._bld.key === key) return world._bld;
+  const st = BLD_STYLES[P.mode] || BLD_STYLES.mall;
+  const rng = new RNG(hash32(world.seed >>> 0, 0xb17d, world.levelSalt >>> 0));
+  const W = st.W, S1 = st.S1, A0 = st.A0, A1 = W - A0, SH = P.storey || st.SH;
+  const F = Math.max(3, Math.min(6, Math.round(P.floors || st.floors)));
+  const mall = P.mode !== 'apartment';
+  const B = { key, P, st, mall, W, S1, A0, A1, SH, F, boxes: [], props: [], fixtures: [], containers: [], items: [], slots: [], spots: [], gaps: [] };
+  for (let f = 0; f < F; f++) { B.slots.push([]); B.spots.push([]); B.gaps.push([]); }
+  const box = (mat, x0, y0, z0, x1, y1, z1, col = BSOLID, o = {}) => {
+    if (x1 - x0 < 0.001 || y1 - y0 < 0.001 || z1 - z0 < 0.001) return;
+    B.boxes.push({ mat, x0, y0, z0, x1, y1, z1, col, faces: o.faces, seg: o.seg, uv: o.uv });
+  };
+  const prop = (type, x, y, z, rot, opts = {}) => B.props.push({ type, x, y, z, rot, opts, seed: rng.int(0, 1e9) });
+  const light = (x, y, z, color, intensity, flicker, range, kind = 'troffer') => { const fx = lampFixture(x, y, z, color, intensity, flicker, range); fx.look = kind; B.fixtures.push(fx); return fx; };
+  const T = 0.15;                                     // wall thickness
+
+  // ---- the shell: outer walls with a row of windows on every floor
+  const winEvery = 4, winW = 2.4;
+  for (let f = 0; f < F; f++) {
+    const y0 = f * SH, sill = y0 + 1.0, head = y0 + SH - 0.7, y1 = y0 + SH;
+    for (const side of ['n', 's', 'w', 'e']) {
+      const along = (a0, a1, yy0, yy1, mat, col) => {
+        if (side === 'n') box(mat, a0, yy0, 0, a1, yy1, 0.3, col, { seg: 2 });
+        else if (side === 's') box(mat, a0, yy0, W - 0.3, a1, yy1, W, col, { seg: 2 });
+        else if (side === 'w') box(mat, 0, yy0, a0, 0.3, yy1, a1, col, { seg: 2 });
+        else box(mat, W - 0.3, yy0, a0, W, yy1, a1, col, { seg: 2 });
+      };
+      along(0, W, y0, sill, st.outer, BSOLID);
+      along(0, W, head, y1, st.outer, BSOLID);
+      let c = 0;
+      for (let a = winEvery / 2; a < W; a += winEvery) {
+        const w0 = a - winW / 2, w1 = a + winW / 2;
+        if (w0 < 0.6 || w1 > W - 0.6) continue;
+        along(c, w0, sill, head, st.outer, BSOLID);
+        // the glass sits in the middle of the wall: it keeps you in, it does not keep the light out
+        if (side === 'n') box('glass', w0, sill, 0.13, w1, head, 0.17, BGLASS);
+        else if (side === 's') box('glass', w0, sill, W - 0.17, w1, head, W - 0.13, BGLASS);
+        else if (side === 'w') box('glass', 0.13, sill, w0, 0.17, head, w1, BGLASS);
+        else box('glass', W - 0.17, sill, w0, W - 0.13, head, w1, BGLASS);
+        c = w1;
+      }
+      along(c, W, sill, head, st.outer, BSOLID);
+    }
+  }
+
+  // ---- units: shops (or flats) in four strips round the outside
+  const units = [];
+  const strip = (side, from, to, firstMin) => {
+    const cuts = [from];
+    let a = Math.max(from + st.unit[0], firstMin + rng.range(st.unit[0], st.unit[1]) * 0.6);
+    while (a < to - st.unit[0] * 0.8 - (firstMin > from ? S1 : 0)) { cuts.push(a); a += rng.range(st.unit[0], st.unit[1]); }
+    cuts.push(to);
+    for (let i = 0; i + 1 < cuts.length; i++) units.push({ side, a0: cuts[i], a1: cuts[i + 1] });
+  };
+  strip('n', 0.3, W - 0.3, S1); strip('s', 0.3, W - 0.3, S1); strip('w', S1, W - S1, S1); strip('e', S1, W - S1, S1);
+  // where a unit's front faces the gallery, and which way is out
+  for (const u of units) {
+    const ns = u.side === 'n' || u.side === 's';
+    u.g0 = ns ? Math.max(u.a0, S1) : u.a0; u.g1 = ns ? Math.min(u.a1, W - S1) : u.a1;   // gallery-facing span
+    u.front = u.side === 'n' ? S1 : u.side === 's' ? W - S1 : u.side === 'w' ? S1 : W - S1;
+    u.n = u.side === 'n' ? [0, 1] : u.side === 's' ? [0, -1] : u.side === 'w' ? [1, 0] : [-1, 0];
+    u.d0 = u.side === 'n' || u.side === 'w' ? 0.3 : u.front;
+    u.d1 = u.side === 'n' || u.side === 'w' ? u.front : W - 0.3;
+    u.door = (u.g0 + u.g1) / 2 + rng.range(-1, 1) * Math.max(0, (u.g1 - u.g0) / 2 - (mall ? 2.4 : 1.2));
+  }
+  B.units = units;
+  // a box in a unit's own frame: along = a, depth = d (measured from the front, into the unit)
+  const ubox = (u, mat, a0, a1, y0, y1, d0, d1, col = BSOLID, o = {}) => {
+    const [nx, nz] = u.n;
+    // depth axis points from the front into the unit, i.e. against the outward normal
+    const za = u.front - nz * d0, zb = u.front - nz * d1, xa = u.front - nx * d0, xb = u.front - nx * d1;
+    if (nx === 0) box(mat, Math.min(a0, a1), y0, Math.min(za, zb), Math.max(a0, a1), y1, Math.max(za, zb), col, o);
+    else box(mat, Math.min(xa, xb), y0, Math.min(a0, a1), Math.max(xa, xb), y1, Math.max(a0, a1), col, o);
+  };
+  const uxz = (u, a, d) => (u.n[0] === 0 ? [a, u.front - u.n[1] * d] : [u.front - u.n[0] * d, a]);
+  const urot = (u) => Math.atan2(u.n[0], u.n[1]);     // a prop facing out of the unit
+  const depthOf = (u) => Math.abs(u.d1 - u.d0);
+
+  // ---- floors, ceilings and slabs (the slab of floor f is the ceiling of floor f-1)
+  for (let f = 1; f <= F; f++) {
+    const y = f * SH;
+    const rects = [[0, 0, W, A0], [0, A1, W, W], [0, A0, A0, A1], [A1, A0, W, A1]];
+    for (const [x0, z0, x1, z1] of rects) box(st.slab, x0, y - 0.3, z0, x1, y, z1, BSOLID | C.PLATFORM, { faces: 1 | 2 | 16 | 32, seg: 3 });
+    // ceiling of the floor below: gallery ceiling and unit ceilings
+    for (const [x0, z0, x1, z1] of rects) box(st.ceil, x0, y - 0.3, z0, x1, y - 0.3 + 0.001, z1, 0, { faces: 8, seg: 2 });
+    if (f === F) {
+      // the roof: the atrium is a skylight
+      box('glass', A0, y - 0.1, A0, A1, y, A1, BGLASS, { faces: 8 | 4 });
+      for (let k = 1; k < 4; k++) { const a = A0 + (A1 - A0) * k / 4; box('metal_white', a - 0.08, y - 0.3, A0, a + 0.08, y, A1, 0); box('metal_white', A0, y - 0.3, a - 0.08, A1, y, a + 0.08, 0); }
+      box(st.outer, -0.2, y, -0.2, W + 0.2, y + 0.6, W + 0.2, 0, { faces: 1 | 2 | 16 | 32 | 4 });
+    }
+  }
+  // floor finishes: gallery ring, unit floors, the atrium at the bottom
+  for (let f = 0; f < F; f++) {
+    const y = f * SH + 0.002;
+    for (const [x0, z0, x1, z1] of [[S1, S1, W - S1, A0], [S1, A1, W - S1, W - S1], [S1, A0, A0, A1], [A1, A0, W - S1, A1]]) box(f ? st.gallery : st.ground, x0, y - 0.002, z0, x1, y, z1, 0, { faces: 4, seg: 2 });
+    if (f === 0) box(st.ground, A0, 0, A0, A1, 0.002, A1, 0, { faces: 4, seg: 2 });
+    for (const u of units) {
+      u.floors = u.floors || [];
+      const r = new RNG(hash32(key.length, u.a0 * 100 | 0, u.front * 100 | 0, f));
+      const un = { kind: 'open', floor: r.pick(st.unitFloors), wall: r.pick(st.unitWalls), sign: r.pick(st.signs), lit: r.chance(mall ? 0.5 : 0.4), seed: r.int(1, 1e9) };
+      if (mall) un.kind = r.chance(0.22) ? 'shutter' : 'open';
+      else un.kind = r.chance(0.3) ? 'locked' : 'open';
+      if (f === 0 && Math.hypot(...uxz(u, u.door, 1).map((v, i) => v - (world.level.spawn || [16, 16])[i])) < 10) un.kind = 'open';
+      u.floors.push(un);
+      ubox(u, un.floor, u.a0 + 0.08, u.a1 - 0.08, y - 0.002, y, 0.01, depthOf(u), 0, { faces: 4, seg: 2 });
+    }
+  }
+
+  // ---- unit walls: partitions, the back is the outer wall, the front faces the gallery
+  for (const u of units) {
+    for (let f = 0; f < F; f++) {
+      const un = u.floors[f], y0 = f * SH, y1 = (f + 1) * SH - 0.3, D = depthOf(u);
+      // partitions at both ends (the strip ends are the outer walls)
+      // (each unit builds the wall at its own start; the last unit of a side strip closes the strip)
+      const ends = [u.a0];
+      if ((u.side === 'w' || u.side === 'e') && Math.abs(u.a1 - (W - S1)) < 0.01) ends.push(u.a1);
+      for (const a of ends) if (a > 0.31 && a < W - 0.31) ubox(u, st.wall, a - T / 2, a + T / 2, y0, y1, 0, D, BSOLID, { seg: 2 });
+      // corner shops: the part of the front that faces another strip is plain wall
+      if (u.g0 > u.a0 + 0.01) ubox(u, un.wall, u.a0, u.g0, y0, y1, 0, T, BSOLID, { seg: 2 });
+      if (u.g1 < u.a1 - 0.01) ubox(u, un.wall, u.g1, u.a1, y0, y1, 0, T, BSOLID, { seg: 2 });
+      // the front
+      const g0 = u.g0, g1 = u.g1, dw = mall ? 1.6 : 0.55, door0 = u.door - dw, door1 = u.door + dw;
+      if (mall) {
+        const head = y0 + SH - 1.2;
+        // piers at both ends (posters go on these), the sign band above, glass between
+        ubox(u, st.pier, g0, g0 + 0.7, y0, y1, 0, T + 0.05, BSOLID);
+        ubox(u, st.pier, g1 - 0.7, g1, y0, y1, 0, T + 0.05, BSOLID);
+        ubox(u, un.kind === 'shutter' ? 'corrugated' : un.sign, g0 + 0.7, g1 - 0.7, head, y1, 0, T, BSOLID);
+        if (un.kind === 'shutter') {
+          ubox(u, 'corrugated', g0 + 0.7, g1 - 0.7, y0, head, 0.02, T - 0.02, BSOLID);
+          ubox(u, 'metal_dark', g0 + 0.7, g1 - 0.7, y0, y0 + 0.08, -0.02, T + 0.02, 0);
+        } else {
+          ubox(u, 'metal_dark', g0 + 0.7, door0, y0, y0 + 0.3, 0, T, BSOLID);
+          ubox(u, 'metal_dark', door1, g1 - 0.7, y0, y0 + 0.3, 0, T, BSOLID);
+          ubox(u, 'glass', g0 + 0.7, door0, y0 + 0.3, head, 0.05, 0.1, BGLASS);
+          ubox(u, 'glass', door1, g1 - 0.7, y0 + 0.3, head, 0.05, 0.1, BGLASS);
+          for (const a of [door0, door1]) ubox(u, 'chrome', a - 0.05, a + 0.05, y0, head, 0, T, BSOLID);
+          if (un.lit) ubox(u, 'fixture_cold', g0 + 1.2, g1 - 1.2, head + 0.25, head + 0.5, -0.03, 0, 0);
+        }
+        for (const [a0, a1] of [[g0, g0 + 0.7], [g1 - 0.7, g1]]) {
+          // a poster on every pier
+          const r = new RNG(hash32(un.seed, a0 * 10 | 0));
+          if (r.chance(0.8)) ubox(u, r.pick(['art_a', 'art_b', 'art_c', 'art_d']), a0 + 0.08, a1 - 0.08, y0 + 1.1, y0 + 2.4, -0.012, 0, 0, { uv: 'unit' });
+        }
+      } else {
+        // a corridor wall with one door to each flat, and a framed print beside it
+        ubox(u, st.wall, g0, door0, y0, y1, 0, T, BSOLID, { seg: 2 });
+        ubox(u, st.wall, door1, g1, y0, y1, 0, T, BSOLID, { seg: 2 });
+        ubox(u, st.wall, door0, door1, y0 + 2.15, y1, 0, T, BSOLID);
+        for (const a of [door0, door1]) ubox(u, 'wood_dark', a - 0.05, a + 0.05, y0, y0 + 2.2, -0.02, T + 0.02, 0);
+        ubox(u, 'wood_dark', door0 - 0.05, door1 + 0.05, y0 + 2.15, y0 + 2.22, -0.02, T + 0.02, 0);
+        if (un.kind === 'locked') ubox(u, 'wood_door', door0, door1, y0, y0 + 2.15, 0.03, T - 0.03, BSOLID);
+        const r = new RNG(hash32(un.seed, 7));
+        const pa = u.door + (r.chance(0.5) ? 1 : -1) * 1.6;
+        if (pa - 0.4 > g0 && pa + 0.4 < g1 && r.chance(0.7)) {
+          ubox(u, 'wood_dark', pa - 0.36, pa + 0.36, y0 + 1.2, y0 + 1.95, -0.03, 0, 0);
+          ubox(u, r.pick(['art_a', 'art_b', 'art_c', 'art_d']), pa - 0.3, pa + 0.3, y0 + 1.26, y0 + 1.89, -0.035, -0.03, 0, { uv: 'unit' });
+        }
+        // a flat number over the door
+        ubox(u, 'brass', u.door - 0.12, u.door + 0.12, y0 + 2.3, y0 + 2.4, -0.02, 0, 0);
+      }
+      // wall slots facing the gallery (piers, corridor walls) for wall-mounted goals on this floor
+      const sa = mall ? g0 + 0.35 : (u.door - dw - 0.8 > g0 + 0.6 ? u.door - dw - 0.8 : null);
+      if (sa !== null && un.kind !== 'shutter') { const [x, z] = uxz(u, sa, 0); B.slots[f].push({ x: x + u.n[0] * 0.0, z: z + u.n[1] * 0.0, nx: u.n[0], nz: u.n[1], unit: u, f }); }
+      // and the back wall inside, facing in
+      if (un.kind === 'open') {
+        // on a pier between two windows of the outer wall (windows are centred every 4 m)
+        let pa = Math.round((u.a0 + u.a1) / 8) * 4;
+        if (pa < u.a0 + 1.2 || pa > u.a1 - 1.2) pa = (u.a0 + u.a1) / 2;
+        const [x, z] = uxz(u, pa, depthOf(u));
+        // (the back wall faces into the shop, toward the gallery: the same way as the shop's front)
+        B.slots[f].push({ x, z, nx: u.n[0], nz: u.n[1], unit: u, f, inside: true });
+        const [sx, sz] = uxz(u, (Math.max(u.a0, g0) + Math.min(u.a1, g1)) / 2, Math.min(D * 0.5, 4));
+        B.spots[f].push({ x: sx, z: sz, rot: urot(u), unit: u });
+      }
+      // a light in each unit: half of them dead (nobody has paid the bill)
+      const [lx, lz] = uxz(u, (u.a0 + u.a1) / 2, D / 2);
+      const dead = !un.lit && un.kind !== 'locked';
+      if (un.kind !== 'shutter' && un.kind !== 'locked') {
+        const fx = light(lx, y1 - 0.05, lz, mall ? [0.9, 0.96, 1.0] : [1.0, 0.82, 0.6], mall ? 2.2 : 1.6, dead ? FLICKER.DEAD : (rng.chance(0.2) ? FLICKER.BUZZ : FLICKER.STEADY), mall ? 12 : 9, mall ? 'troffer' : 'bulb');
+        fx.unit = true;
+      }
+      // what is left in it
+      if (un.kind === 'open') furnish(B, u, f, un, uxz, urot, depthOf(u), prop, rng);
+    }
+  }
+
+  // ---- galleries: glass railings round the atrium, gaps where the escalators land
+  const climbs = [];
+  const len = SH / Math.tan(Math.atan(st.climb)), total = len + 1.6, nSteps = Math.max(12, Math.round(SH / 0.2));
+  for (let f = 0; f + 1 < F; f++) {
+    const north = f % 2 === 0, zc = north ? A0 + 1.06 : A1 - 1.06, cx = A0 + 0.05 + 0.2 + total / 2;
+    const top0 = cx + total / 2 - 0.8, top1 = cx + total / 2;
+    climbs.push({ f, zc, cx, top0, top1, north });
+    prop('escalator', cx, f * SH, zc, Math.PI / 2, { len, rise: SH, steps: nSteps, still: !mall, landings: false, deck: mall ? 'metal_grey' : 'concrete', side: mall ? 'metal_white' : 'concrete' });
+    // the bottom gets on from the west gallery, the top gets off sideways onto the north / south gallery
+    B.gaps[f].push({ edge: 'w', a0: zc - 0.95, a1: zc + 0.95 });
+    B.gaps[f + 1].push({ edge: north ? 'n' : 's', a0: top0 - 0.3, a1: top1 + 0.1 });
+    // a stop at the far end of the top landing, so nobody walks off into the atrium
+    const y = (f + 1) * SH;
+    box(st.rail, top1, y, zc - 0.85, top1 + 0.08, y + 1.1, zc + 0.85, BGLASS);
+    // the gap between the gallery edge and the lane is bridged on both landings
+    const ez = north ? [A0 - 0.02, zc - 0.7] : [zc + 0.7, A1 + 0.02];
+    box(st.gallery, top0 - 0.25, y - 0.2, ez[0], top1, y, ez[1], C.SOLID | C.PLATFORM, { faces: 4 | 8 });
+    if (f > 0) box(st.gallery, A0 - 0.02, f * SH - 0.2, zc - 0.85, A0 + 0.3, f * SH, zc + 0.85, C.SOLID | C.PLATFORM, { faces: 4 | 8 });
+  }
+  B.climbs = climbs;
+  for (let f = 1; f < F; f++) {
+    const y = f * SH;
+    for (const edge of ['n', 's', 'w', 'e']) {
+      const gaps = B.gaps[f].filter((g) => g.edge === edge).sort((p, q) => p.a0 - q.a0);
+      let a = A0;
+      const run = (a0, a1) => {
+        if (a1 - a0 < 0.05) return;
+        const line = edge === 'n' || edge === 'w' ? A0 : A1;
+        const [lx0, lx1] = [line - 0.04, line + 0.04];
+        if (edge === 'n' || edge === 's') {
+          box('glass', a0, y + 0.06, lx0, a1, y + 1.0, lx1, BGLASS);
+          box(st.rail, a0, y + 1.0, lx0 - 0.03, a1, y + 1.08, lx1 + 0.03, 0);
+          box(st.rail, a0, y, lx0 - 0.02, a1, y + 0.06, lx1 + 0.02, 0);
+        } else {
+          box('glass', lx0, y + 0.06, a0, lx1, y + 1.0, a1, BGLASS);
+          box(st.rail, lx0 - 0.03, y + 1.0, a0, lx1 + 0.03, y + 1.08, a1, 0);
+          box(st.rail, lx0 - 0.02, y, a0, lx1 + 0.02, y + 0.06, a1, 0);
+        }
+      };
+      for (const g of gaps) { run(a, g.a0); a = Math.max(a, g.a1); }
+      run(a, A1);
+    }
+  }
+  // columns at the corners of the atrium, ground to roof
+  for (const [x, z] of [[A0 - 0.5, A0 - 0.5], [A1 + 0.5, A0 - 0.5], [A0 - 0.5, A1 + 0.5], [A1 + 0.5, A1 + 0.5]]) {
+    box(mall ? 'marble_floor' : st.slab, x - 0.35, 0, z - 0.35, x + 0.35, F * SH, z + 0.35, BSOLID, { seg: 2 });
+  }
+
+  // ---- gallery lights, under every slab, and pendant lamps hanging into the atrium
+  for (let f = 0; f < F; f++) {
+    const y = (f + 1) * SH - 0.32, mid = (S1 + A0) / 2, mid2 = W - mid;
+    for (let a = S1 + 2; a < W - S1 - 1; a += mall ? 6 : 5) {
+      for (const [x, z] of [[a, mid], [a, mid2]]) light(x, y, z, mall ? [1.0, 0.96, 0.88] : [1.0, 0.8, 0.55], mall ? 2.6 : 1.7, rng.chance(0.08) ? FLICKER.DEAD : (rng.chance(0.1) ? FLICKER.BUZZ : FLICKER.STEADY), mall ? 13 : 9, mall ? 'troffer' : 'bulb');
+    }
+    for (let a = A0 + 2; a < A1 - 1; a += mall ? 6 : 5) {
+      for (const [x, z] of [[mid, a], [mid2, a]]) light(x, y, z, mall ? [1.0, 0.96, 0.88] : [1.0, 0.8, 0.55], mall ? 2.6 : 1.7, rng.chance(0.08) ? FLICKER.DEAD : FLICKER.STEADY, mall ? 13 : 9, mall ? 'troffer' : 'bulb');
+    }
+  }
+  for (let f = 1; f <= F; f++) {
+    for (const [x, z] of [[A0 + 4, A0 + 5], [A1 - 4, A0 + 5], [A0 + 4, A1 - 5], [A1 - 4, A1 - 5]]) {
+      if (f === F || rng.chance(0.5)) light(x, f * SH - 1.6, z, [1.0, 0.9, 0.72], f === F ? 4.2 : 2.4, FLICKER.STEADY, f === F ? 22 : 14, 'pendant');
+    }
+  }
+
+  // ---- the atrium floor: a fountain, palms and planters, benches round them
+  const ax = (A0 + A1) / 2;
+  if (P.fountain !== false) {
+    B.items.push({ kind: 'fountain', x: ax, z: ax, r: mall ? 3.2 : 2.4 });
+    const r = mall ? 3.2 : 2.4;
+    box('statue_marble', ax - r * 0.72, 0, ax - r * 0.72, ax + r * 0.72, 0.62, ax + r * 0.72, C.SOLID | C.PLATFORM, { faces: 0 });
+    box('statue_marble', ax - 0.35, 0, ax - 0.35, ax + 0.35, 2.6, ax + 0.35, C.SOLID, { faces: 0 });
+    light(ax, 0.9, ax, [0.55, 0.85, 1.0], 1.6, FLICKER.STEADY, 9, 'under');
+  }
+  const ring = mall ? 7.2 : 5.0;
+  for (let k = 0; k < 8; k++) {
+    const a = k * Math.PI / 4 + Math.PI / 8, x = ax + Math.cos(a) * ring, z = ax + Math.sin(a) * ring;
+    if (climbs.some((c) => Math.abs(z - c.zc) < 2.2 && x < c.top1 + 1)) continue;
+    if (k % 2) prop(mall ? 'palm_tree' : 'planter', x, 0, z, a, {});
+    else prop('bench', x, 0, z, a + Math.PI / 2, { mat: 'wood_dark' });
+  }
+  // planters and benches along the galleries, upstairs too
+  for (let f = 0; f < F; f++) {
+    for (const [x, z] of [[S1 + 1.0, S1 + 1.0], [W - S1 - 1.0, S1 + 1.0], [S1 + 1.0, W - S1 - 1.0], [W - S1 - 1.0, W - S1 - 1.0]]) prop('planter', x, f * SH, z, 0, {});
+    if (f > 0) for (const [x, z, rot] of [[A1 + 1.2, ax, Math.PI / 2], [ax + 6, A1 + 1.2, 0]]) prop('bench', x, f * SH, z, rot, { mat: 'wood_dark' });
+  }
+  return (world._bld = B);
+}
+
+/** What is left in a unit: shelves stripped bare, racks with nothing on them, a counter; a bed and a sofa in a flat. */
+function furnish(B, u, f, un, uxz, urot, D, prop, rng0) {
+  const r = new RNG(hash32(un.seed, 0xf0));
+  const y = f * B.SH, w = u.a1 - u.a0, mid = (u.a0 + u.a1) / 2, back = urot(u) + Math.PI;
+  const put = (type, a, d, rot, opts = {}) => {
+    if (a < u.a0 + 0.8 || a > u.a1 - 0.8 || d < 1.2 || d > D - 0.5) return;
+    const [x, z] = uxz(u, a, d);
+    prop(type, x, y, z, rot, opts);
+  };
+  const box = (kind, a, d, rot) => {
+    if (a < u.a0 + 0.8 || a > u.a1 - 0.8 || d < 1.2 || d > D - 0.6) return;
+    const [x, z] = uxz(u, a, d);
+    B.containers.push({ kind, x, y, z, rot, f });
+  };
+  if (B.mall) {
+    const kind = r.pick(['shop', 'shop', 'clothes', 'food', 'bare']);
+    // shelves against the back wall
+    if (kind !== 'food') for (let a = u.a0 + 1.2; a < u.a1 - 1.0; a += 1.3) if (r.chance(0.8)) put('shelf', a, D - 0.45, back);
+    if (kind === 'shop') for (let a = u.a0 + 2; a < u.a1 - 1.5; a += 3) put('shelf', a, D * 0.5, back + (r.chance(0.5) ? Math.PI : 0));
+    if (kind === 'clothes') for (let k = 0; k < r.int(2, 4); k++) put('costume_rack', u.a0 + r.range(1.5, w - 1.5), r.range(2, D - 2), r.range(0, 3));
+    if (kind === 'food') for (let k = 0; k < r.int(2, 4); k++) { const a = u.a0 + r.range(1.5, w - 1.5), d = r.range(2.2, D - 2); put('table', a, d, 0); put('chair_plastic', a + 0.7, d, -Math.PI / 2); }
+    if (kind !== 'bare') box('counter', u.a0 + 1.4, 2.0, urot(u));
+    if (r.chance(0.6)) box('box', mid + r.range(-w / 3, w / 3), r.range(1.6, D - 1), r.range(0, 6));
+    if (r.chance(0.35)) put('shopping_cart', mid + r.range(-w / 3, w / 3), r.range(1.6, D - 1.5), r.range(0, 6));
+    if (r.chance(0.5)) put('box_stack', u.a1 - 1.2, D - 1.4, 0);
+  } else {
+    put('bed', u.a0 + 1.4, D - 1.4, back);
+    box('nightstand', u.a0 + 2.6, D - 0.5, back);
+    put('couch', u.a1 - 1.8, D * 0.45, urot(u) + Math.PI / 2);
+    put('table', mid, D * 0.55, 0);
+    if (r.chance(0.6)) put('tv_old', u.a1 - 1.0, D - 0.6, back);
+    if (r.chance(0.5)) box('dresser', mid + 1.0, D - 0.5, back);
+    if (r.chance(0.5)) put('lamp_floor', u.a0 + 1.0, 1.4, 0);
+    if (r.chance(0.4)) box('box', mid - 1.0, 1.8, r.range(0, 6));
+  }
+  void rng0;
+}
+
+/** Is (x, z) inside the building? On floor f >= 1, is there floor under it (not the atrium)? */
+function bldSlab(B, x, z, f) {
+  if (x < 0 || z < 0 || x > B.W || z > B.W) return f === 0;
+  if (f <= 0) return true;
+  if (x > B.A0 && x < B.A1 && z > B.A0 && z < B.A1) return false;
+  return true;
+}
+
+function clipBox(bx, l) {
+  const x0 = Math.max(bx.x0, l.x0), x1 = Math.min(bx.x1, l.x0 + CH), z0 = Math.max(bx.z0, l.z0), z1 = Math.min(bx.z1, l.z0 + CH);
+  return x1 - x0 > 0.0005 && z1 - z0 > 0.0005 ? [x0, z0, x1, z1] : null;
+}
+const ownsXZ = (l, x, z) => x >= l.x0 && x < l.x0 + CH && z >= l.z0 && z < l.z0 + CH;
+
+function layoutBuilding(world, l, rng, P) {
+  const B = bldPlan(world, P);
+  l.puddles = []; l.drips = []; l.plants = []; l.moss = []; l.stains = [];
+  const inside = l.x0 < B.W && l.z0 < B.W && l.x0 + CH > 0 && l.z0 + CH > 0;
+  if (!inside) {
+    // the car park outside: lamps and wrecks to look at through the windows, nothing to search
+    layoutLot(world, l, rng); l.lot = true;
+    l.containers = []; l.spawns = []; l.customSlots = [];
+    return;
+  }
+  l.bld = B;
+  l.boxes = [];
+  for (const bx of B.boxes) {
+    const c = clipBox(bx, l);
+    if (!c) continue;
+    l.boxes.push({ ...bx, x0: c[0], z0: c[1], x1: c[2], z1: c[3] });
+    if (bx.col) l.colliders.add(makeCollider(c[0], bx.y0, c[1], c[2], bx.y1, c[3], bx.col));
+  }
+  // props: geometry in the chunk that owns the centre, colliders clipped into every chunk they touch
+  for (const gp of B.props) {
+    for (const { a, carry } of propColliders(gp.type, gp.x, gp.y, gp.z, gp.rot, gp.opts)) {
+      const c = clipBox({ x0: a[0], x1: a[3], z0: a[2], z1: a[5] }, l);
+      if (!c) continue;
+      const col = makeCollider(c[0], a[1], c[1], c[2], a[4], c[3], C.SOLID | C.PLATFORM);
+      if (carry) col.carry = carry;
+      l.colliders.add(col);
+    }
+    if (ownsXZ(l, gp.x, gp.z)) l.props.push({ type: gp.type, x: gp.x, y: gp.y, z: gp.z, rot: gp.rot, opts: gp.opts, seed: gp.seed, scale: 1 });
+  }
+  for (const ct of B.containers) if (ownsXZ(l, ct.x, ct.z)) addContainer(l, ct.kind, ct.x, ct.y, ct.z, ct.rot, rng, {});
+  for (const fx of B.fixtures) if (ownsXZ(l, fx.x, fx.z)) l.fixtures.push({ ...fx });
+  for (const it of B.items) if (ownsXZ(l, it.x, it.z)) l.items.push(it);
+  // ground-floor wall slots: the ordinary (floor-less) wall goals hang on these
+  for (const s of B.slots[0]) if (ownsXZ(l, s.x, s.z)) slot(world, l, s.x + s.nx * 0.08, s.z + s.nz * 0.08, s.nx, s.nz);
+}
+
+function buildBuilding(world, l, b) {
+  if (l.lot) { buildLot(world, l, b); return; }
+  const B = l.bld;
+  // car park round the building (inside this chunk)
+  const x1 = l.x0 + CH, z1 = l.z0 + CH;
+  if (x1 > B.W) ground(b, 'asphalt', Math.max(l.x0, B.W), l.z0, x1, z1, 0, 2);
+  if (z1 > B.W) ground(b, 'asphalt', l.x0, Math.max(l.z0, B.W), Math.min(x1, B.W), z1, 0, 2);
+  for (const bx of l.boxes) {
+    if (bx.faces === 0) continue;
+    const o = { seg: bx.seg || 0 };
+    if (bx.faces !== undefined) o.faces = bx.faces;
+    if (bx.uv) { o.uv = bx.uv; o.nu = 1; o.nv = 1; }
+    b.box(bx.mat, bx.x0, bx.y0, bx.z0, bx.x1, bx.y1, bx.z1, o);
+  }
+  for (const fx of l.fixtures) {
+    if (fx.look === 'troffer') b.box('fixture_troffer', fx.x - 0.6, fx.y - 0.03, fx.z - 0.3, fx.x + 0.6, fx.y + 0.04, fx.z + 0.3, { slot: fx.slot, uv: 'unit' });
+    else if (fx.look === 'pendant') {
+      b.cylinder('metal_dark', fx.x, fx.y + 0.3, fx.z, 0.012, 1.3, { segments: 4 });
+      b.cylinder('brass', fx.x, fx.y + 0.15, fx.z, 0.45, 0.18, { segments: 14, rTop: 0.12 });
+      b.box('fixture_bulb', fx.x - 0.16, fx.y - 0.05, fx.z - 0.16, fx.x + 0.16, fx.y + 0.15, fx.z + 0.16, { slot: fx.slot, uv: 'unit' });
+    } else if (fx.look === 'bulb') b.box('fixture_bulb', fx.x - 0.12, fx.y - 0.12, fx.z - 0.12, fx.x + 0.12, fx.y + 0.04, fx.z + 0.12, { slot: fx.slot, uv: 'unit' });
+  }
+  for (const it of l.items) {
+    if (it.kind === 'fountain') {
+      const r = it.r;
+      b.cylinder('statue_marble', it.x, 0, it.z, r, 0.62, { segments: 32 });
+      b.cylinder('pool_water', it.x, 0.5, it.z, r - 0.18, 0.02, { segments: 32, caps: 'top' });
+      b.cylinder('statue_marble', it.x, 0.5, it.z, 0.32, 1.5, { segments: 14, rTop: 0.22 });
+      b.cylinder('statue_marble', it.x, 2.0, it.z, 1.1, 0.16, { segments: 24, rTop: 0.9 });
+      b.cylinder('pool_water', it.x, 2.14, it.z, 0.8, 0.02, { segments: 20, caps: 'top' });
+      b.cylinder('statue_marble', it.x, 2.16, it.z, 0.14, 0.7, { segments: 10 });
+      b.cylinder('statue_marble', it.x, 2.86, it.z, 0.45, 0.1, { segments: 16, rTop: 0.3 });
+      // falling water: thin sheets from the upper bowl down to the basin
+      for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+        b.quad('puddle_clear', it.x + c * 0.98, 0.52, it.z + s * 0.98, -s * 0.5, 0, c * 0.5, 0, 1.6, 0, { uv: 'unit' });
+      }
+    }
+  }
+}
+
+/** Floor support for the rest of the game: entities, objectives and the player's checkpoints. */
+function bldFloors(world, P) {
+  const B = bldPlan(world, P);
+  return {
+    count: B.F, storey: B.SH,
+    y: (f) => f * B.SH,
+    floorOf: (y) => Math.max(0, Math.min(B.F - 1, Math.floor((y + 0.6) / B.SH))),
+    slab: (x, z, f) => bldSlab(B, x, z, f),
+    dropTo(x, z, f) { while (f > 0 && !bldSlab(B, x, z, f)) f--; return f; },
+    slots: (f) => (B.slots[f] || []),
+    spots: (f) => (B.spots[f] || []),
+  };
+}
+
+// ------------------------------------------------------------------ stairwell
+// A stairwell level is the stairwell: the shaft itself is the level's stairshaft
+// goal (stage key atSpawn puts it round the spawn), and all the generator lays is
+// the dark concrete it stands on.
+function buildStairwellGround(world, l, b) {
+  ground(b, 'concrete_floor', l.x0, l.z0, l.x0 + CH, l.z0 + CH, 0, 4);
 }
 
 // ------------------------------------------------------------------ suburbs
@@ -18788,6 +20066,7 @@ class Player {
   reset(x, z, y = 0) {
     this.pos.set(x, y + 0.05, z);
     this.vel.set(0, 0, 0);
+    this.standOn = null;
     this.yaw = Math.PI * 0.25;
     this.pitch = 0;
     this.stance = 'stand';
@@ -18799,7 +20078,16 @@ class Player {
   get inWater() { return this.game.level && !!this.game.level.wet; }
 
   update(dt) {
-    if (this.game.rideLock && this.game.rideRun) { this.game.rideRun.update(dt); return; }
+    if (this.game.rideLock && this.game.rideRun) {
+      // in a slide's tube you can still work your flashlight - it is the only light in there
+      if (input.hit('flashlight')) {
+        if (!this.flashlightOn && this.battery <= 1) this.game.hud.toast('The battery is dead.', 1000);
+        else { this.flashlightOn = !this.flashlightOn; this.audio.click(this.flashlightOn ? 1 : 0.8); }
+      }
+      if (this.flashlightOn) this.battery = Math.max(0, this.battery - dt * 0.42);
+      this.game.rideRun.update(dt);
+      return;
+    }
     if (settings.get('immortal')) this.holdVitals();
     const inp = input;
     // ------------------------------------------------------------- look
@@ -18873,6 +20161,7 @@ class Player {
     const fallSpeed = this.vel.y;
 
     // ------------------------------------------------------------- integrate
+    this.carry(dt);
     this.pos.y += this.vel.y * dt;
     const sub = Math.min(4, 1 + Math.floor(Math.hypot(this.vel.x, this.vel.z) * dt / 0.14));
     const sdt = dt / sub;
@@ -18993,6 +20282,28 @@ class Player {
     this.stance = want;
   }
 
+  /**
+   * Whatever the player stands on can move them: a carousel deck turns them (and
+   * their view) round its centre, an escalator step carries them up the incline.
+   * The step colliders do not move - the next step is only a riser higher, so
+   * being carried into it simply steps the player up.
+   */
+  carry(dt) {
+    const cr = this.onGround && this.standOn && this.standOn.carry;
+    if (!cr || this.game.rideLock) return;
+    if (cr.spin) {
+      const a = cr.spin * dt, rx = this.pos.x - cr.x, rz = this.pos.z - cr.z, c = Math.cos(a), s = Math.sin(a);
+      this.pos.x = cr.x + rx * c + rz * s;
+      this.pos.z = cr.z - rx * s + rz * c;
+      this.yaw += a;
+    } else if (cr.belt) {
+      this.pos.x += cr.dx * cr.belt * dt;
+      this.pos.z += cr.dz * cr.belt * dt;
+      if (!this.beltToast && this.game.hud) { this.beltToast = true; this.game.hud.toast('The escalator is still running.', 1800); }
+    }
+    this.resolveHorizontal();
+  }
+
   resolveHorizontal() {
     const r = RADIUS;
     const feet = this.pos.y, head = this.pos.y + this.bodyH;
@@ -19018,20 +20329,22 @@ class Player {
     // the level floor and ceiling are geometry, not colliders: the generator
     // reports the floor height (groundAt) and the walk height comes from the gen
     const cols = this.world.queryColliders(this.pos.x - r, this.pos.z - r, this.pos.x + r, this.pos.z + r, this.tmp2);
-    let ground = this.world.groundAt(this.pos.x, this.pos.z), ceil = Infinity;
+    let ground = this.world.groundAt(this.pos.x, this.pos.z), ceil = Infinity, on = null;
     for (const c of cols) {
       if (!c.enabled) continue;
       if (!(c.flags & (C.SOLID | C.PLATFORM))) continue;
       if (!circleBoxPush(this.pos.x, this.pos.z, r * 0.92, c)) continue;
-      if (c.maxY <= this.pos.y + STEP + 0.02 && c.maxY > ground) ground = c.maxY;
+      if (c.maxY <= this.pos.y + STEP + 0.02 && c.maxY > ground) { ground = c.maxY; on = c; }
       if (c.minY >= this.pos.y + 0.4 && c.minY < ceil) ceil = c.minY;
     }
     if (ground > -Infinity && this.pos.y <= ground + 0.02) {
       this.pos.y = ground;
       if (this.vel.y < 0) this.vel.y = 0;
       this.onGround = true;
+      this.standOn = on;
     } else {
       this.onGround = false;
+      this.standOn = null;
     }
     if (ceil < Infinity && this.pos.y + this.bodyH > ceil) {
       this.pos.y = ceil - this.bodyH;
@@ -19285,11 +20598,11 @@ class Hud {
     clearTimeout(this._rt1); clearTimeout(this._rt2); clearTimeout(this._rt3);
     if (!on) { el.classList.remove('on'); return; }
     const t = el.querySelector('#ride-text');
-    t.textContent = 'You push off.';
+    t.textContent = 'You climb in. The plastic is warm.';
     el.classList.add('on');
-    this._rt1 = setTimeout(() => { t.textContent = 'It keeps going.'; }, secs * 1000 * 0.3);
-    this._rt2 = setTimeout(() => { t.textContent = 'Faster. The walls are gone.'; }, secs * 1000 * 0.58);
-    this._rt3 = setTimeout(() => { t.textContent = 'You can hear the bottom.'; }, secs * 1000 * 0.82);
+    this._rt1 = setTimeout(() => { t.textContent = 'The light from the mouth is gone.'; }, secs * 1000 * 0.3);
+    this._rt2 = setTimeout(() => { t.textContent = 'Faster. Only your flashlight now.'; }, secs * 1000 * 0.58);
+    this._rt3 = setTimeout(() => { t.textContent = 'Something is waiting at the bottom.'; }, secs * 1000 * 0.82);
   }
 
   rideFade(a) { const f = document.getElementById('ride-fade'); if (f) f.style.opacity = a; }
@@ -21594,12 +22907,59 @@ class Bus {
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 
 /**
- * A slide ride. Two parts: the real chute (you slide down the tower's own chute into its tunnel mouth), then the
- * tube: a long winding tube drawn around you high above the level, where nothing can get in the way. A safe slide
- * ends in a splash back at the foot of the tower; the others end in nothing, and you keep going.
+ * A slide ride. You climb into the mouth in the wall, and the tube takes you: a
+ * long winding tube of shiny coloured plastic, drawn around you high above the
+ * level where nothing can get in the way. Daylight from the mouth fades behind
+ * you within a few seconds; after that the only light in the tube is your own
+ * flashlight. Where it ends depends on the slide (see Objectives.setup):
+ *
+ *   safe  'door' | 'lobby' | 'hatch'   a way out: the stage is done
+ *   bad   'jaws' | 'grinder' | 'whirlpool' | 'drop'
  */
 const THREE = __mod['vendor/three/build/three.module.js'];
 const RIDE_Y = 80;
+const TUBE_VERT = /* glsl */`
+varying vec3 vW; varying vec3 vN; varying vec2 vUv;
+void main() {
+  vec4 w = modelMatrix * vec4(position, 1.0);
+  vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); vUv = uv;
+  gl_Position = projectionMatrix * viewMatrix * w;
+}`;
+// lit only by the flashlight (a cone from the camera) and the fading light from the mouth
+const TUBE_FRAG = /* glsl */`
+uniform vec3 uCam; uniform vec3 uDir; uniform float uFlash; uniform float uAmb; uniform float uS;
+uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC; uniform vec3 uColD;
+uniform float uStripes; uniform vec3 uTint; uniform vec3 uGlow; uniform float uShine;
+varying vec3 vW; varying vec3 vN; varying vec2 vUv;
+void main() {
+  vec3 toP = vW - uCam; float d = length(toP); vec3 L = toP / max(d, 1e-4);
+  vec3 N = normalize(vN); if (dot(N, L) > 0.0) N = -N;
+  float cone = smoothstep(0.84, 0.97, dot(L, uDir));
+  float att = 1.0 / (1.0 + 0.12 * d + 0.03 * d * d);
+  float lam = max(dot(N, -L), 0.0);
+  float flash = uFlash * (0.06 + 0.94 * cone) * att * (0.35 + 0.65 * lam) * 1.7;
+  float amb = uAmb / (1.0 + 0.05 * d);
+  vec3 base = uTint;
+  if (uStripes > 0.5) {
+    float band = fract(vUv.x * 3.0 + (uS + vUv.y * 3.0) / 7.0);
+    float k = floor(band * 4.0);
+    base = k < 0.5 ? uColA : (k < 1.5 ? uColB : (k < 2.5 ? uColC : uColD));
+  }
+  float light = flash + amb;
+  float spec = uShine * (pow(lam, 70.0) * uFlash * att * 3.5 + pow(lam, 9.0) * 0.18 * flash);
+  float sheen = uShine * smoothstep(0.03, 0.0, abs(fract(vUv.x * 2.0) - 0.25)) * light * 0.55;
+  gl_FragColor = vec4(base * (light + 0.01) + vec3(spec + sheen) + uGlow, 1.0);
+}`;
+const PLASTICS = [0xb3b9c4, 0xdb4034, 0x3d8ee0, 0xe8c22a, 0x3fc468, 0xe07c26];
+const ENDINGS = {
+  door: { safe: true, text: 'The tube spits you out in front of an exit door. You are alive.' },
+  lobby: { safe: true, text: 'You tumble out onto damp carpet, under humming lights. You are alive.' },
+  hatch: { safe: true, text: 'The tube ends under a hatch. You climb out into the air.' },
+  jaws: { text: 'The slide emptied into something\'s mouth.' },
+  grinder: { text: 'The slide ended in a grinder.' },
+  whirlpool: { text: 'The slide dropped you into a whirlpool. It did not let go.' },
+  drop: { text: 'The slide ended in a drop.' },
+};
 class Ride {
   constructor(game) {
     this.game = game;
@@ -21607,13 +22967,19 @@ class Ride {
     this.group.visible = false;
     game.scene.add(this.group);
     this.segs = []; this.rings = [];
-    const cyl = new THREE.CylinderGeometry(1.4, 1.4, 3.0, 16, 1, true), tor = new THREE.TorusGeometry(1.4, 0.07, 6, 24);
-    // the tube you ride down is moulded plastic in the slide's own colour: opaque, with
-    // a faint sheen on every other segment and on the rings between them (see goals.js)
-    this.mats = [0, 1].map(() => new THREE.MeshBasicMaterial({ color: 0x66ccff, side: THREE.DoubleSide, fog: false }));
-    this.ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+    const cyl = new THREE.CylinderGeometry(1.4, 1.4, 3.0, 20, 4, true), tor = new THREE.TorusGeometry(1.4, 0.07, 6, 24);
+    const U = this.U = {
+      uCam: { value: new THREE.Vector3() }, uDir: { value: new THREE.Vector3(0, 0, -1) },
+      uFlash: { value: 1 }, uAmb: { value: 1 },
+      uColA: { value: new THREE.Color() }, uColB: { value: new THREE.Color(0xe8c22a) }, uColC: { value: new THREE.Color(0x3d8ee0) }, uColD: { value: new THREE.Color(0x3fc468) },
+    };
+    this.mat = (o = {}) => new THREE.ShaderMaterial({
+      uniforms: { ...U, uS: { value: 0 }, uStripes: { value: o.stripes ? 1 : 0 }, uTint: { value: new THREE.Color(o.tint ?? 0xffffff) }, uGlow: { value: new THREE.Color(o.glow ?? 0x000000) }, uShine: { value: o.shine ?? 1 } },
+      vertexShader: TUBE_VERT, fragmentShader: TUBE_FRAG, side: THREE.DoubleSide, fog: false,
+    });
+    this.ringMat = this.mat({ tint: 0xdddddd, shine: 1.4 });
     for (let i = 0; i < 34; i++) {
-      const m = new THREE.Mesh(cyl, this.mats[i & 1]); m.frustumCulled = false; this.group.add(m); this.segs.push(m);
+      const m = new THREE.Mesh(cyl, this.mat({ stripes: true })); m.frustumCulled = false; this.group.add(m); this.segs.push(m);
       const r = new THREE.Mesh(tor, this.ringMat); r.frustumCulled = false; this.group.add(r); this.rings.push(r);
     }
     this.phase = null;
@@ -21621,23 +22987,27 @@ class Ride {
     this._up = new THREE.Vector3(0, 1, 0); this._fwd = new THREE.Vector3(0, 0, 1); this._t = new THREE.Vector3();
   }
 
-  start(goal, safe, secs, onSafe) {
+  start(goal, safe, secs, onSafe, ending) {
     this.goal = goal; this.safe = safe; this.onSafe = onSafe;
-    this.len = goal.opts.len || 8; this.H = 3.0;
+    this.ending = ENDINGS[ending] && !!ENDINGS[ending].safe === !!safe ? ending : (safe ? 'door' : 'drop');
     this.T = Math.max(5, secs);                       // seconds in the tube
-    this.tA = 1.0 + this.len * 0.14;                  // seconds on the chute
-    this.t = 0; this.phase = 'chute'; this.whoosh = 0;
-    // the six slide plastics, in the same order as SLIDE_PLASTIC in goals.js
-    const hex = [0xb3b9c4, 0xdb4034, 0x3d8ee0, 0xe8c22a, 0x3fc468, 0xe07c26][(goal.opts.hue || 0) % 6];
-    this.mats[0].color.setHex(hex); this.mats[1].color.setHex(hex).lerp(new THREE.Color(0xffffff), 0.18);
-    this.ringMat.color.setHex(hex).lerp(new THREE.Color(0xffffff), 0.42);
+    this.tA = 0.9;                                    // seconds climbing in
+    this.t = 0; this.phase = 'enter'; this.whoosh = 0; this.dark = false;
+    const hex = PLASTICS[(goal.opts.hue || 0) % 6];
+    // the slide's own colour leads; the other three stripes are the rest of the park's plastic
+    const others = PLASTICS.filter((h) => h !== hex && h !== 0xb3b9c4);
+    this.U.uColA.value.setHex(hex); this.U.uColB.value.setHex(others[0]); this.U.uColC.value.setHex(hex); this.U.uColD.value.setHex(others[(goal.opts.num || 1) % others.length]);
+    this.ringMat.uniforms.uTint.value.setHex(hex).lerp(new THREE.Color(0xffffff), 0.5);
     this.game.hud.ride(true, this.tA + this.T + 2);
     this.game.audio.door('hatch');
     goal.group.updateMatrixWorld(true);
+    const P = this.game.player;
+    this.from = { x: P.pos.x, y: P.pos.y, z: P.pos.z, yaw: P.yaw, pitch: P.pitch };
   }
 
   abort() {
     this.phase = null; this.group.visible = false;
+    this.clearEnd();
     this.game.hud.ride(false); this.game.hud.rideFade(0);
   }
 
@@ -21653,9 +23023,11 @@ class Ride {
     const a = Math.random() * 6, b = Math.random() * 6, k0 = 0.05 + Math.random() * 0.03;
     let px = x, py = RIDE_Y, pz = z, h = yaw;
     for (let s = 0; s <= L + 20; s += ds) {
-      const kap = k0 * (1 + 0.6 * Math.sin(s * 0.04 + a)) + 0.02 * Math.sin(s * 0.11 + b);
+      // the last stretch runs straight, so whatever waits at the end is seen coming
+      const calm = Math.max(0, Math.min(1, (L - 14 - s) / 10));
+      const kap = calm * (k0 * (1 + 0.6 * Math.sin(s * 0.04 + a)) + 0.02 * Math.sin(s * 0.11 + b));
       h += kap * ds;
-      const pitch = -0.07 - 0.1 * Math.sin(s * 0.07 + b), cp = Math.cos(pitch);
+      const pitch = -0.07 - 0.1 * Math.sin(s * 0.07 + b) * calm, cp = Math.cos(pitch);
       const tx = -Math.sin(h) * cp, tz = -Math.cos(h) * cp, ty = Math.sin(pitch);
       px += tx * ds; py += ty * ds; pz += tz * ds;
       pts.push({ x: px, y: py, z: pz, tx, ty, tz, h, pitch, kap });
@@ -21669,6 +23041,87 @@ class Ride {
     return { x: l(A.x, B.x), y: l(A.y, B.y), z: l(A.z, B.z), tx: l(A.tx, B.tx), ty: l(A.ty, B.ty), tz: l(A.tz, B.tz), h: l(A.h, B.h), pitch: l(A.pitch, B.pitch), kap: l(A.kap, B.kap) };
   }
 
+  /** Whatever waits where the tube ends, built at the end of the path, facing along it. */
+  buildEnd() {
+    this.clearEnd();
+    const e = this.ending, p = this.at(this.L), g = new THREE.Group(), parts = this.endParts = {};
+    g.position.set(p.x, p.y, p.z);
+    // local +z along the tube, local +y as near to straight up as the tube allows (doors stand upright)
+    const zA = new THREE.Vector3(p.tx, p.ty, p.tz).normalize(), xA = new THREE.Vector3().crossVectors(this._up, zA).normalize(), yA = new THREE.Vector3().crossVectors(zA, xA);
+    g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xA, yA, zA));
+    const add = (geo, mat, o = {}) => { const m = new THREE.Mesh(geo, mat); m.position.set(o.x || 0, o.y || 0, o.z || 0); if (o.rx) m.rotation.x = o.rx; if (o.ry) m.rotation.y = o.ry; if (o.rz) m.rotation.z = o.rz; m.frustumCulled = false; g.add(m); return m; };
+    if (e === 'door' || e === 'lobby' || e === 'hatch') {
+      // a cap on the tube with a bright way out in it
+      add(new THREE.CircleGeometry(1.42, 28), this.mat({ tint: 0x222222 }), { z: 1.2 });
+      const glow = e === 'lobby' ? 0xffe39a : e === 'hatch' ? 0xdff2ff : 0xfffdf2;
+      if (e === 'hatch') add(new THREE.CircleGeometry(0.55, 24), this.mat({ tint: 0, glow, shine: 0 }), { z: 1.19 });
+      else add(new THREE.PlaneGeometry(e === 'lobby' ? 1.9 : 0.9, e === 'lobby' ? 1.3 : 1.9), this.mat({ tint: 0, glow, shine: 0 }), { z: 1.19, y: e === 'lobby' ? -0.2 : -0.3 });
+    } else if (e === 'jaws') {
+      // the tube ends in a mouth: rings of teeth, a wet red gullet, and a glow far down it
+      add(new THREE.CylinderGeometry(4.2, 2.2, 22, 24, 6, true), this.mat({ tint: 0x6a0a10, shine: 1.6 }), { z: 13, rx: Math.PI / 2 });
+      add(new THREE.CircleGeometry(2.3, 24), this.mat({ tint: 0, glow: 0x4a0204, shine: 0 }), { z: 23.5 });
+      parts.teeth = [];
+      for (const [z, n, r] of [[1.4, 16, 1.55], [3.4, 18, 2.4], [6.0, 20, 3.2]]) {
+        const ring = new THREE.Group(); ring.position.z = z; g.add(ring);
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2, tooth = new THREE.Mesh(new THREE.ConeGeometry(0.22 + (i % 3) * 0.06, 1.3 + (i % 2) * 0.6, 7), this.mat({ tint: 0xe8e2c8, shine: 1.2 }));
+          tooth.position.set(Math.cos(a) * r, Math.sin(a) * r, 0);
+          tooth.rotation.z = a + Math.PI / 2; tooth.frustumCulled = false;
+          ring.add(tooth);
+        }
+        parts.teeth.push({ ring, r });
+      }
+    } else if (e === 'grinder') {
+      // two drums of blades across the exit, turning against each other
+      add(new THREE.CircleGeometry(2.2, 24), this.mat({ tint: 0, glow: 0x2a0800, shine: 0 }), { z: 6 });
+      parts.drums = [];
+      for (const s of [-1, 1]) {
+        const drum = new THREE.Group(); drum.position.set(0, s * 0.62, 2.2); g.add(drum);
+        const core = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 3.4, 16), this.mat({ tint: 0x6a6d72, shine: 1.5 }));
+        core.rotation.z = Math.PI / 2; core.frustumCulled = false; drum.add(core);
+        for (let i = 0; i < 12; i++) for (let k = -3; k <= 3; k++) {
+          const a = (i / 12) * Math.PI * 2, blade = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.34, 0.12), this.mat({ tint: 0xb8bcc2, shine: 2 }));
+          blade.position.set(k * 0.45, Math.cos(a) * 0.55, Math.sin(a) * 0.55); blade.rotation.x = -a; blade.frustumCulled = false;
+          drum.add(blade);
+        }
+        parts.drums.push({ drum, s });
+      }
+      for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.2, 2.6, 0.6), this.mat({ tint: 0x2a2c30 }), { x: s * 1.75, z: 2.2 });
+    } else if (e === 'whirlpool') {
+      // the tube ends in the air, over a black sea turning round a hole
+      const tex = canvasTexR(256, 256, (c, w, h) => {
+        c.fillStyle = '#02080c'; c.fillRect(0, 0, w, h);
+        c.strokeStyle = 'rgba(140,200,220,0.55)'; c.lineWidth = 3;
+        for (let arm = 0; arm < 5; arm++) { c.beginPath(); for (let i = 0; i < 90; i++) { const a = arm * 1.2566 + i * 0.09, r = 4 + i * 1.4; c.lineTo(w / 2 + Math.cos(a) * r, h / 2 + Math.sin(a) * r); } c.stroke(); }
+        const gr = c.createRadialGradient(w / 2, h / 2, 2, w / 2, h / 2, 30); gr.addColorStop(0, '#000'); gr.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
+      });
+      const water = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshBasicMaterial({ map: tex, color: 0x6b8c96, fog: false }));
+      water.frustumCulled = false; this.group.add(water);
+      water.position.set(p.x + p.tx * 14, p.y - 22, p.z + p.tz * 14); water.rotation.x = -Math.PI / 2;
+      parts.water = water;
+    }
+    this.group.add(g);
+    this.endGroup = g;
+  }
+
+  clearEnd() {
+    const dispose = (o) => o.traverse((m) => { if (m.isMesh) { m.geometry.dispose(); if (m.material !== this.ringMat && !this.segs.some((s) => s.material === m.material)) { if (m.material.map) m.material.map.dispose(); m.material.dispose(); } } });
+    if (this.endGroup) { this.group.remove(this.endGroup); dispose(this.endGroup); this.endGroup = null; }
+    if (this.endParts && this.endParts.water) { this.group.remove(this.endParts.water); dispose(this.endParts.water); }
+    this.endParts = null;
+  }
+
+  /** The tube's light: your flashlight, and the mouth's daylight fading behind you. */
+  light(s) {
+    const pl = this.game.player, cam = this.game.engine.camera;
+    this.U.uCam.value.copy(cam.position);
+    cam.getWorldDirection(this.U.uDir.value);
+    const on = pl.flashlightOn && pl.battery > 1;
+    this.U.uFlash.value = on ? Math.min(1, 0.35 + pl.battery / 60) : 0;
+    this.U.uAmb.value = 0.9 * Math.pow(Math.max(0, 1 - s / 30), 2);
+    if (!on && s > 30 && !this.dark) { this.dark = true; this.game.hud.toast('Pitch black. Your flashlight is the only light in here.', 2600); }
+  }
+
   update(dt) {
     const g = this.game, pl = g.player, hud = g.hud;
     input.consumeMouse();
@@ -21677,57 +23130,90 @@ class Ride {
     this.whoosh -= dt;
     if (this.whoosh <= 0) { this.whoosh = 0.22; g.audio.burst(2200 + Math.random() * 900, 0.6, 0.3, this.phase === 'tube' ? 0.12 : 0.06, 'bandpass'); }
     const goal = this.goal, rot = goal.rot;
-    if (this.phase === 'chute') {
-      const u = Math.min(1, this.t / this.tA), e = u * u * (0.5 + 0.5 * u);
-      const z = 0.9 - e * (this.len + 0.9);
-      const y = z > 0.4 ? this.H : this.H - (0.4 - z) * (this.H - 0.55) / this.len;
-      this._v.set(0, y, z); goal.group.localToWorld(this._v);
-      this.aim(pl, this._v.x, this._v.y, this._v.z, rot, z > 0.4 ? -0.05 : -Math.atan2(this.H - 0.55, this.len) - 0.05);
+    if (this.phase === 'enter') {
+      // duck and climb into the mouth
+      const u = Math.min(1, this.t / this.tA), e = u * u * (3 - 2 * u);
+      this._v.set(0, 0.2 - 0.05 * e, 1.3 - 1.25 * e); goal.group.localToWorld(this._v);
+      this.aim(pl, this._v.x, this._v.y, this._v.z, rot, -0.05 * e);
+      hud.rideFade(Math.max(0, (u - 0.65) / 0.35));
       if (u >= 1) { this.phase = 'dark'; this.t = 0; }
     } else if (this.phase === 'dark') {
-      hud.rideFade(Math.min(1, this.t / 0.3));
-      if (this.t >= 0.4) {
-        this._v.set(0, 0, -this.len - 0.8); goal.group.localToWorld(this._v);
+      hud.rideFade(1);
+      if (this.t >= 0.35) {
+        this._v.set(0, 0, -1.0); goal.group.localToWorld(this._v);
         this.buildPath(this._v.x, this._v.z, rot);
+        this.buildEnd();
         this.group.visible = true; this.phase = 'tube'; this.t = 0;
       }
     } else if (this.phase === 'tube') {
       hud.rideFade(Math.max(0, 1 - this.t / 0.5));
       const T = this.T, k = Math.min(1, this.t / T);
-      const s = 6 * this.t + 17 * T * (k * k * k - 0.5 * k * k * k * k);
-      const p = this.at(Math.min(s, this.L));
+      const s = Math.min(this.L, 6 * this.t + 17 * T * (k * k * k - 0.5 * k * k * k * k));
+      const p = this.at(s);
       this.aim(pl, p.x, p.y - 0.65, p.z, p.h, p.pitch, -p.kap * 6);
-      this.layTube(Math.min(s, this.L));
+      this.layTube(s);
+      this.light(s);
+      this.animEnd(dt, this.L - s);
       g.player.addTrauma(0.05 + k * 0.1);
       if (this.t >= T) {
-        this.endV = 23; this.endP = p; this.phase = this.safe ? 'splash' : 'fall'; this.t = 0;
-        this.fy = p.y - 0.65;
+        this.endV = 23; this.endP = p; this.t = 0;
+        this.phase = this.safe ? 'out' : (this.ending === 'jaws' || this.ending === 'grinder' ? 'crush' : 'fall');
       }
-    } else if (this.phase === 'splash') {
-      hud.rideFade(Math.min(1, this.t / 0.3));
+    } else if (this.phase === 'out') {
+      // into the light
+      this.light(this.L); hud.rideFade(Math.min(1, this.t / 0.3));
       if (this.t >= 0.4) {
-        this.group.visible = false;
-        this._v.set(0, 0, 5.6); goal.group.localToWorld(this._v);
-        pl.pos.set(this._v.x, 0, this._v.z); pl.vel.set(0, 0, 0); pl.yaw = rot; pl.pitch = 0;
-        hud.rideFade(0); hud.whiteout(true); hud.toast('SPLASH. You are alive.', 2400);
+        this.group.visible = false; this.clearEnd();
+        this._v.set(0, 0, 1.6); goal.group.localToWorld(this._v);
+        pl.pos.set(this._v.x, g.world.groundAt(this._v.x, this._v.z), this._v.z); pl.vel.set(0, 0, 0); pl.yaw = rot; pl.pitch = 0;
+        hud.rideFade(0); hud.whiteout(true); hud.toast(ENDINGS[this.ending].text, 2800);
         setTimeout(() => hud.whiteout(false), 900);
         const cb = this.onSafe;
         this.phase = null; g.rideLock = false; hud.ride(false);
         cb();
       }
+    } else if (this.phase === 'crush') {
+      // carried on into the teeth / the blades
+      const p = this.endP, d = Math.min(3.2, this.t * 9);
+      this.aim(pl, p.x + p.tx * d, p.y - 0.65 + p.ty * d, p.z + p.tz * d, p.h, p.pitch, Math.sin(this.t * 40) * 0.05);
+      this.light(this.L); this.animEnd(dt, -d);
+      g.player.addTrauma(0.6);
+      if (this.t > 0.25) hud.damage(1);
+      hud.rideFade(Math.max(0, (this.t - 0.45) / 0.3));
+      if (this.t >= 0.8) this.kill();
     } else if (this.phase === 'fall') {
-      // out of the end of the tube, and nothing there
-      const p = this.endP, v = this.endV, t = this.t;
+      // out of the end of the tube, and nothing there - or a sea turning round a hole
+      const p = this.endP, v = this.endV, t = this.t, swirl = this.ending === 'whirlpool';
       this.fy = p.y - 0.65 - 0.5 * 9.8 * t * t + p.ty * v * t;
-      this.aim(pl, p.x + p.tx * v * t, this.fy, p.z + p.tz * v * t, p.h, Math.max(-1.35, p.pitch - t * 0.9), 0);
-      hud.rideFade(Math.max(0, (t - 0.9) / 0.6));
-      if (t >= 1.6) {
-        this.group.visible = false; hud.rideFade(0);
-        this.phase = null; g.rideLock = false; hud.ride(false);
-        pl.health = 0; pl.dead = true;
-        g.die(null, 'The slide ended in a drop.');
-      }
+      const yaw = p.h + (swirl ? t * t * 2.2 : 0);
+      this.aim(pl, p.x + p.tx * v * Math.min(t, 0.7), Math.max(this.fy, p.y - 21.5), p.z + p.tz * v * Math.min(t, 0.7), yaw, Math.max(-1.35, p.pitch - t * 0.9), swirl ? Math.sin(t * 3) * 0.3 : 0);
+      this.light(this.L); this.animEnd(dt, 0);
+      hud.rideFade(Math.max(0, (t - (swirl ? 1.6 : 0.9)) / 0.6));
+      if (t >= (swirl ? 2.3 : 1.6)) this.kill();
     }
+  }
+
+  animEnd(dt, ahead) {
+    const P = this.endParts;
+    if (!P) return;
+    if (P.teeth) for (const [i, T] of P.teeth.entries()) {
+      // the mouth closes as you come
+      const close = Math.max(0, Math.min(1, 1 - (ahead - i * 2) / 10));
+      const k = 1 - 0.55 * close * close;
+      for (const tooth of T.ring.children) { tooth.position.setLength(T.r * k); }
+      T.ring.rotation.z += dt * (i % 2 ? 0.3 : -0.3) * close;
+    }
+    if (P.drums) for (const D of P.drums) D.drum.rotation.x += dt * 9 * D.s;
+    if (P.water) P.water.rotation.z += dt * 0.9;
+  }
+
+  kill() {
+    const g = this.game, pl = g.player, hud = g.hud;
+    this.group.visible = false; hud.rideFade(0); this.clearEnd();
+    this.phase = null; g.rideLock = false; hud.ride(false);
+    // the body is found at the slide's mouth: that is where a respawn picks you up again
+    pl.health = 0; pl.dead = true;
+    g.die(null, ENDINGS[this.ending].text);
   }
 
   /** Lay the pooled tube pieces along the path around the rider's position s. */
@@ -21739,11 +23225,19 @@ class Ride {
       const p = this.at(sj);
       this._t.set(p.tx, p.ty, p.tz).normalize();
       m.visible = true; m.position.set(p.x, p.y, p.z); m.quaternion.copy(this._q.setFromUnitVectors(this._up, this._t));
-      m.material = this.mats[(j0 + i) & 1];
+      m.material.uniforms.uS.value = j0 + i;
       const q = this.at(sj - 1.5);
       r.visible = true; r.position.set(q.x, q.y, q.z); r.quaternion.copy(this._q.setFromUnitVectors(this._fwd, this._t));
     }
   }
+}
+
+/** A small canvas texture (the ride's whirlpool). */
+function canvasTexR(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d'); if (g) draw(g, w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 class Game {
@@ -21911,8 +23405,10 @@ class Game {
     this.world.renderRadius = fullRadius;
 
     this.player.reset(sp.x, sp.z, this.world.groundAt(sp.x, sp.z));
+    if (this.objectives.spawnYaw !== undefined) this.player.yaw = this.objectives.spawnYaw;
     this.player.revive();
     this.player.water = 1;
+    this.checkpoint = null; this.onBelt = false;
     this.dust.setDensity(settings.get('particles') | 0);
     this.audio.setLevel(level);
     this.lights.onFlickerEvent = (fx, kind) => this.audio.flicker(fx, kind, this.player.pos);
@@ -21969,12 +23465,12 @@ class Game {
     }
   }
 
-  /** Waterslides: hand the player to the Ride (real chute, long tube, then the splash or the drop). */
-  ride(goal, safe, secs, onSafe) {
+  /** Slides: hand the player to the Ride (into the mouth, the long dark tube, then whatever is at the end). */
+  ride(goal, safe, secs, onSafe, ending) {
     if (this.rideLock || this.state !== 'play') return;
     this.rideLock = true;
     this.hud.prompt(null);
-    (this.rideRun || (this.rideRun = new Ride(this))).start(goal, safe, secs, onSafe);
+    (this.rideRun || (this.rideRun = new Ride(this))).start(goal, safe, secs, onSafe, ending);
   }
 
   abortRide() {
@@ -22008,14 +23504,45 @@ class Game {
     this.audio.staticOn();
   }
 
+  /** A respawn point part-way through a level (transports, escalators, stairwell landings). */
+  setCheckpoint(x, y, z, yaw, label) {
+    const c = this.checkpoint;
+    if (c && Math.hypot(c.x - x, c.z - z) < 2 && Math.abs(c.y - y) < 1) return;
+    this.checkpoint = { x, y, z, yaw };
+    if (label) this.hud.toast(label, 1600);
+    if (this.bus) this.bus.emit('checkpoint', this.checkpoint);
+  }
+
+  /** Escalators and stairwell landings set checkpoints as you pass them. */
+  watchCheckpoints() {
+    const pl = this.player;
+    const belt = !!(pl.onGround && pl.standOn && pl.standOn.carry && pl.standOn.carry.belt);
+    if (belt && !this.onBelt) this.beltFromY = pl.pos.y;
+    if (!belt && this.onBelt && pl.onGround && pl.pos.y > (this.beltFromY ?? 0) + 1.5) {
+      const fl = this.world.gen && this.world.gen.floors;
+      this.setCheckpoint(pl.pos.x, pl.pos.y, pl.pos.z, pl.yaw, fl ? `Checkpoint: floor ${fl.floorOf(pl.pos.y) + 1}` : 'Checkpoint');
+    }
+    this.onBelt = belt;
+    for (const g of this.objectives.goals) {
+      if (g.type !== 'stairshaft' || Math.hypot(pl.pos.x - g.x, pl.pos.z - g.z) > 6) continue;
+      const R = Math.max(2.2, g.opts.rise || 2.8), k = Math.floor((pl.pos.y - g.y + 0.1) / R);
+      const exit = (g.exits || []).find((e) => Math.abs(e.y - (pl.pos.y - g.y)) < 0.15);
+      if (pl.onGround && k > 0 && (exit || k % 4 === 0) && (g.cpLanding || 0) < k) {
+        g.cpLanding = k;
+        this.setCheckpoint(pl.pos.x, pl.pos.y, pl.pos.z, pl.yaw, exit ? `Checkpoint: floor ${exit.floor}` : `Checkpoint: landing ${k}`);
+      }
+    }
+  }
+
   respawn() {
-    const sp = this.spawnPoint;
+    const sp = this.spawnPoint, cp = this.checkpoint;
     this.director.reset();
     this.objectives.onDeath();
-    this.player.reset(sp.x, sp.z, 0);
+    if (cp) { this.player.reset(cp.x, cp.z, cp.y); this.player.yaw = cp.yaw; }
+    else this.player.reset(sp.x, sp.z, 0);
     this.player.revive();
     this.player.water = Math.max(this.player.water, 1);
-    this.world.update(0, sp.x, sp.z);
+    this.world.update(0, cp ? cp.x : sp.x, cp ? cp.z : sp.z);
     this.entities.redistribute();
     this.phobia.onRespawn();
     this.audio.staticOff();
@@ -22035,11 +23562,22 @@ class Game {
     }
   }
 
-  levelComplete() {
+  levelComplete(next = null) {
     if (this.state !== 'play') return;
     this.state = 'complete';
     const level = this.level;
     save.completeLevel(level.id, this.levelTime, this.deaths);
+    // a transport that goes on: the elevator / stairs / slide carries you straight into the next level
+    const to = next && LEVELS.find((l) => l.id === next);
+    if (to) {
+      this.bus.emit('levelComplete', { level, time: this.levelTime, deaths: this.deaths });
+      this.audio.complete();
+      this.hud.whiteout(true);
+      this.hud.setTimer(null);
+      this.hud.toast(`${level.name} complete. It carries you on to ${to.name} - ${to.subtitle}.`, 2600);
+      setTimeout(() => { if (this.state === 'complete' && this.level === level) this.enter(to.id); }, 1600);
+      return;
+    }
     const bounty = 2 * save.tier('bounty');
     if (bounty) save.addBank(bounty);
     this.bus.emit('levelComplete', { level, time: this.levelTime, deaths: this.deaths });
@@ -22118,6 +23656,7 @@ class Game {
       this.focusT -= dt;
       if (this.focusT <= 0) { this.focusT = 0.08; this.updateFocus(); }
       this.player.update(dt);
+      if (this.state === 'play') this.watchCheckpoints();
     }
     if (this.state === 'dead') {
       input.consumeMouse();
@@ -22187,6 +23726,14 @@ function boot() {
     }
     window.game = new Game(canvas);
     window.__levels = LEVELS;
+    // a level studio preview goes straight into the level (click the view to take the mouse)
+    if (window.__previewLevel && LEVELS.some((l) => l.id === window.__previewLevel)) {
+      const g = window.game;
+      g.enter(window.__previewLevel).then(() => g.hud.toast('Studio preview. Click to look around - Esc for the menu.', 4200));
+    } else if (window.__previewError) {
+      const box = document.getElementById('fatal');
+      if (box) { box.classList.remove('hidden'); box.textContent = 'Level studio preview failed: ' + window.__previewError; }
+    }
   } catch (err) {
     console.error(err);
     const box = document.getElementById('fatal');

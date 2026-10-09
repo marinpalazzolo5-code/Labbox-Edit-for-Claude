@@ -222,23 +222,27 @@ It gives up quickly.</textarea>
   <div class="steps">
     <h2>Put it in the game</h2>
     <ol>
-      <li>Press <b>Download .js</b> (or <b>Copy the file</b>) and save it as <code id="path1">entities/hall-thing.js</code></li>
+      <li>Pick the <b>pack</b> below, press <b>Download .js</b> (or <b>Copy the file</b>) and save it as <code id="path1">entities/base/hall-thing.js</code></li>
       <li>Open <code>entities/loader.js</code> and add this line to the list, before <code>'core/phobia-finish.js'</code>, so the game loads the file at all:
-        <pre id="line1">    'hall-thing.js',</pre></li>
-      <li>Add the id to the creature pick list - the <code>"entities"</code> array inside the <code>GAME</code> block, kept in alphabetical order -
-        in <code>other/level-studio.html</code> and <code>other/entity-studio.html</code>, so a level can spawn it:
-        <pre id="idline">    "hall-thing",</pre></li>
-      <li>Reload the game. The entity viewer and the field guide pick the creature up by themselves once the file loads;
-        the wiring check below says whether a step is still missing.</li>
+        <pre id="line1">    'base/hall-thing.js',</pre></li>
+      <li>That is all. The level studio's creature lists, <code>tools/levelcheck/check.mjs</code>, the entity viewer and the field guide
+        read whatever <code>loader.js</code> loads. The folder decides who may use it: a creature in <code>entities/base/</code> can be used
+        by any level of any pack; one in <code>entities/phobia/</code>, <code>corruption/</code> or <code>playground/</code> only by that
+        pack's levels. Reload this page - the wiring check below lists every creature that loaded, by pack.</li>
     </ol>
     <div class="row" style="margin-top:8px">
-      <div style="flex:1 1 220px"><label>File name <span class="small">saved inside entities/</span></label><input type="text" id="filename" value="hall-thing"></div>
+      <div style="flex:1 1 160px"><label>Pack <span class="small">the folder inside entities/</span></label><select id="pack">
+        <option value="base" selected>base - any level</option>
+        <option value="phobia">phobia - Phobia Wing only</option>
+        <option value="corruption">corruption - Corruption only</option>
+        <option value="playground">playground - Playground only</option>
+      </select></div>
+      <div style="flex:1 1 220px"><label>File name <span class="small">saved inside entities/&lt;pack&gt;/</span></label><input type="text" id="filename" value="hall-thing"></div>
     </div>
     <div class="row" style="margin-top:8px">
       <button type="button" id="dl">Download .js</button>
       <button type="button" id="copy">Copy the file</button>
       <button type="button" id="copyline">Copy the loader line</button>
-      <button type="button" id="copyid">Copy the id line</button>
     </div>
     <div id="problems"></div>
     <div id="wire"></div>
@@ -268,7 +272,7 @@ It gives up quickly.</textarea>
 // (entities/core/rig.js and models-kit.js), so it walks, hunts or ignores you
 // exactly like the built-in ones do.
 // ============================================================================
-const GAME = {"entities":["absence","arbiter","beast","bleeder","bloom","chase","clump","coil","colossus","counter","crawler","deathmoth","deephand","demon","dread","duller","examiner","faceling","flawless","formless","frostbitten","glitch","glutton","goodboy","gremlin","haze","hive","horizon","hound","hourman","howler","jester","librarian","lure","mannequin","mourner","murder","mut_chorus","mut_drowned","mut_fractured","mut_splice","mut_sprawl","mut_thicket","ninelives","onlooker","overgrowth","palestag","partygoer","peripheral","pg_attendant","pg_bouncer","pg_lifeguard","pg_mascot","pg_ringmaster","phantom","phlebotomist","porcelain","puppet","reflection","revenant","rootwalker","sandman","shade","shadow","showman","skinstealer","smiler","someone","squeeze","stature","stormcaller","stranger","supervisor","thorn","troglosidae","umbra","updraft","weaver","whisperer","window","worm","wretch"],"classes":["Apex Hostile","Hostile","Hostile / Ethereal","Hostile at night","Hostile in numbers","Lethal","Lethal (indirectly)","Lethal / Apex","Passive"],"stats":{"smiler":{"name":"Smiler","cls":"Hostile","speed":0.8,"chase":2,"dmg":34,"detect":6.5},"partygoer":{"name":"Partygoer","cls":"Hostile","speed":1.1,"chase":3.3,"dmg":22,"detect":13},"howler":{"name":"Howler","cls":"Hostile","speed":1.3,"chase":4.8,"dmg":30,"detect":8},"skinstealer":{"name":"Skin Stealer","cls":"Hostile","speed":1.1,"chase":2.9,"dmg":30,"detect":12},"chase":{"name":"The Chase","cls":"Lethal","speed":0,"chase":4.2,"dmg":45,"detect":999},"hound":{"name":"Hound","cls":"Hostile","speed":1.3,"chase":4.3,"dmg":18,"detect":6.5},"faceling":{"name":"Faceling","cls":"Passive","speed":1,"chase":0,"dmg":0,"detect":0},"wretch":{"name":"Wretch","cls":"Hostile","speed":1,"chase":3.4,"dmg":20,"detect":10},"clump":{"name":"Clump","cls":"Hostile","speed":0.6,"chase":1.8,"dmg":40,"detect":16},"deathmoth":{"name":"Deathmoth","cls":"Hostile","speed":1.6,"chase":3.7,"dmg":25,"detect":11},"mannequin":{"name":"Mannequin","cls":"Hostile","speed":0,"chase":5.8,"dmg":30,"detect":24},"haze":{"name":"The Haze","cls":"Hostile","speed":0.5,"chase":0.95,"dmg":6,"detect":16},"worm":{"name":"The Worm","cls":"Lethal","speed":1.7,"chase":4.6,"dmg":45,"detect":16},"whisperer":{"name":"Whisperer","cls":"Hostile","speed":1,"chase":2.6,"dmg":30,"detect":30},"stature":{"name":"The Stature","cls":"Lethal","speed":0.9,"chase":3.5,"dmg":45,"detect":28},"crawler":{"name":"Crawler","cls":"Hostile","speed":1.4,"chase":6.4,"dmg":24,"detect":14},"duller":{"name":"Duller","cls":"Hostile","speed":1,"chase":3.3,"dmg":32,"detect":11},"troglosidae":{"name":"Troglosidae","cls":"Hostile","speed":0.8,"chase":5,"dmg":26,"detect":9},"window":{"name":"Window","cls":"Hostile","speed":0,"chase":0,"dmg":22,"detect":2.4},"beast":{"name":"The Beast of Level 5","cls":"Hostile","speed":0.9,"chase":3.1,"dmg":38,"detect":13},"peripheral":{"name":"Peripheral","cls":"Passive","speed":0.6,"chase":0,"dmg":0,"detect":0},"puppet":{"name":"Stop-Motion Puppet","cls":"Hostile at night","speed":0.7,"chase":3.3,"dmg":24,"detect":14},"weaver":{"name":"The Weaver","cls":"Hostile","speed":1,"chase":4.6,"dmg":26,"detect":9},"coil":{"name":"The Coil","cls":"Lethal","speed":1.2,"chase":3.4,"dmg":34,"detect":11},"goodboy":{"name":"The Good Boy","cls":"Apex Hostile","speed":1.8,"chase":6.2,"dmg":42,"detect":18},"murder":{"name":"The Murder","cls":"Hostile","speed":2.4,"chase":4.2,"dmg":9,"detect":26},"ninelives":{"name":"Nine Lives","cls":"Lethal / Apex","speed":1.6,"chase":3.8,"dmg":55,"detect":24},"revenant":{"name":"The Revenant","cls":"Hostile / Ethereal","speed":0.7,"chase":2.4,"dmg":38,"detect":35},"porcelain":{"name":"Porcelain","cls":"Hostile","speed":0,"chase":5.2,"dmg":20,"detect":40},"showman":{"name":"The Showman","cls":"Hostile","speed":1.2,"chase":3.8,"dmg":32,"detect":20},"jester":{"name":"Giggles","cls":"Lethal","speed":1.6,"chase":5.4,"dmg":28,"detect":16},"mourner":{"name":"The Restless Dead","cls":"Hostile","speed":1.1,"chase":3.6,"dmg":22,"detect":8},"phlebotomist":{"name":"The Phlebotomist","cls":"Hostile","speed":1.1,"chase":3.7,"dmg":16,"detect":12},"lure":{"name":"The Lure","cls":"Lethal","speed":0.7,"chase":1.6,"dmg":42,"detect":30},"palestag":{"name":"The Pale Stag","cls":"Lethal","speed":1.3,"chase":5.8,"dmg":36,"detect":40},"updraft":{"name":"The Updraft","cls":"Lethal (indirectly)","speed":1.6,"chase":2.8,"dmg":0,"detect":30},"colossus":{"name":"The Colossus","cls":"Lethal","speed":3,"chase":3,"dmg":55,"detect":999},"squeeze":{"name":"The Squeeze","cls":"Hostile","speed":1,"chase":5.6,"dmg":26,"detect":10},"horizon":{"name":"The Horizon Man","cls":"Lethal","speed":2.4,"chase":2.4,"dmg":60,"detect":999},"absence":{"name":"The Absence","cls":"Hostile","speed":0.8,"chase":1.25,"dmg":24,"detect":999},"deephand":{"name":"The Deep Hand","cls":"Lethal (indirectly)","speed":0,"chase":0,"dmg":18,"detect":6},"onlooker":{"name":"The Onlooker","cls":"Hostile","speed":0,"chase":4.6,"dmg":34,"detect":999},"someone":{"name":"Someone","cls":"Lethal","speed":1.2,"chase":5.2,"dmg":38,"detect":14},"hive":{"name":"The Hive","cls":"Hostile","speed":1,"chase":3.3,"dmg":18,"detect":12},"umbra":{"name":"The Umbra","cls":"Lethal","speed":1,"chase":4.6,"dmg":30,"detect":14},"reflection":{"name":"Your Reflection","cls":"Hostile","speed":0,"chase":0,"dmg":30,"detect":999},"examiner":{"name":"The Examiner","cls":"Hostile","speed":0.9,"chase":2.8,"dmg":30,"detect":9},"flawless":{"name":"The Flawless","cls":"Hostile","speed":0.8,"chase":3.9,"dmg":26,"detect":999},"arbiter":{"name":"The Arbiter","cls":"Lethal","speed":1,"chase":4.4,"dmg":34,"detect":999},"sandman":{"name":"The Sandman","cls":"Lethal","speed":0,"chase":3.2,"dmg":40,"detect":999},"thorn":{"name":"The Thornbound","cls":"Hostile","speed":1.1,"chase":3.4,"dmg":22,"detect":11},"formless":{"name":"The Formless","cls":"Lethal","speed":1.2,"chase":4,"dmg":30,"detect":16},"dread":{"name":"The Dread","cls":"Lethal","speed":1,"chase":3,"dmg":30,"detect":18},"phantom":{"name":"Phantom","cls":"Passive","speed":0.5,"chase":0,"dmg":0,"detect":0},"stranger":{"name":"The Strangers","cls":"Hostile in numbers","speed":0,"chase":1.7,"dmg":0,"detect":999},"hourman":{"name":"The Hour Man","cls":"Lethal","speed":1,"chase":1.6,"dmg":45,"detect":999},"counter":{"name":"The Counter","cls":"Lethal","speed":0,"chase":5,"dmg":36,"detect":999},"glitch":{"name":"Corrupted","cls":"Hostile","speed":0,"chase":0,"dmg":28,"detect":999},"stormcaller":{"name":"The Stormcaller","cls":"Lethal","speed":2,"chase":4.2,"dmg":40,"detect":999},"frostbitten":{"name":"The Frostbitten","cls":"Hostile","speed":0.7,"chase":1.6,"dmg":26,"detect":10},"bleeder":{"name":"The Bleeder","cls":"Hostile","speed":1,"chase":3.5,"dmg":22,"detect":12},"bloom":{"name":"The Bloom","cls":"Hostile","speed":0,"chase":3.8,"dmg":28,"detect":999},"librarian":{"name":"The Librarian","cls":"Lethal","speed":0.8,"chase":4.4,"dmg":34,"detect":0},"overgrowth":{"name":"The Overgrowth","cls":"Hostile","speed":0.9,"chase":2.4,"dmg":20,"detect":14},"glutton":{"name":"The Glutton","cls":"Hostile","speed":0.9,"chase":3.4,"dmg":24,"detect":9},"rootwalker":{"name":"The Rootwalker","cls":"Lethal","speed":0,"chase":1.8,"dmg":38,"detect":999},"supervisor":{"name":"The Supervisor","cls":"Hostile","speed":1,"chase":3.9,"dmg":30,"detect":0},"mut_chorus":{"name":"The Chorus","cls":"Hostile","speed":0.9,"chase":2.3,"dmg":40,"detect":8},"mut_splice":{"name":"The Splice","cls":"Hostile","speed":1.1,"chase":3,"dmg":34,"detect":12},"mut_thicket":{"name":"The Thicket","cls":"Lethal","speed":0.9,"chase":3.6,"dmg":45,"detect":28},"mut_sprawl":{"name":"The Sprawl","cls":"Lethal","speed":1.4,"chase":6.2,"dmg":26,"detect":14},"mut_fractured":{"name":"The Fractured","cls":"Hostile","speed":0,"chase":5.6,"dmg":32,"detect":24},"mut_drowned":{"name":"The Drowned Howler","cls":"Hostile","speed":1.3,"chase":4.6,"dmg":32,"detect":9},"pg_lifeguard":{"name":"The Lifeguard","cls":"Hostile","speed":1.1,"chase":3.1,"dmg":30,"detect":13},"pg_mascot":{"name":"The Mascot","cls":"Lethal","speed":0.9,"chase":3.5,"dmg":45,"detect":28},"pg_attendant":{"name":"The Attendant","cls":"Hostile","speed":0,"chase":5.6,"dmg":30,"detect":24},"pg_bouncer":{"name":"The Bouncer","cls":"Lethal","speed":1.4,"chase":6.3,"dmg":25,"detect":14},"pg_ringmaster":{"name":"The Ringmaster","cls":"Hostile","speed":1.3,"chase":4.7,"dmg":30,"detect":9}}};
+const GAME = {"classes":["Apex Hostile","Hostile","Hostile / Ethereal","Hostile at night","Hostile in numbers","Lethal","Lethal (indirectly)","Lethal / Apex","Passive"],"stats":{"smiler":{"name":"Smiler","cls":"Hostile","speed":0.8,"chase":2,"dmg":34,"detect":6.5},"partygoer":{"name":"Partygoer","cls":"Hostile","speed":1.1,"chase":3.3,"dmg":22,"detect":13},"howler":{"name":"Howler","cls":"Hostile","speed":1.3,"chase":4.8,"dmg":30,"detect":8},"skinstealer":{"name":"Skin Stealer","cls":"Hostile","speed":1.1,"chase":2.9,"dmg":30,"detect":12},"chase":{"name":"The Chase","cls":"Lethal","speed":0,"chase":4.2,"dmg":45,"detect":999},"hound":{"name":"Hound","cls":"Hostile","speed":1.3,"chase":4.3,"dmg":18,"detect":6.5},"faceling":{"name":"Faceling","cls":"Passive","speed":1,"chase":0,"dmg":0,"detect":0},"wretch":{"name":"Wretch","cls":"Hostile","speed":1,"chase":3.4,"dmg":20,"detect":10},"clump":{"name":"Clump","cls":"Hostile","speed":0.6,"chase":1.8,"dmg":40,"detect":16},"deathmoth":{"name":"Deathmoth","cls":"Hostile","speed":1.6,"chase":3.7,"dmg":25,"detect":11},"mannequin":{"name":"Mannequin","cls":"Hostile","speed":0,"chase":5.8,"dmg":30,"detect":24},"haze":{"name":"The Haze","cls":"Hostile","speed":0.5,"chase":0.95,"dmg":6,"detect":16},"worm":{"name":"The Worm","cls":"Lethal","speed":1.7,"chase":4.6,"dmg":45,"detect":16},"whisperer":{"name":"Whisperer","cls":"Hostile","speed":1,"chase":2.6,"dmg":30,"detect":30},"stature":{"name":"The Stature","cls":"Lethal","speed":0.9,"chase":3.5,"dmg":45,"detect":28},"crawler":{"name":"Crawler","cls":"Hostile","speed":1.4,"chase":6.4,"dmg":24,"detect":14},"duller":{"name":"Duller","cls":"Hostile","speed":1,"chase":3.3,"dmg":32,"detect":11},"troglosidae":{"name":"Troglosidae","cls":"Hostile","speed":0.8,"chase":5,"dmg":26,"detect":9},"window":{"name":"Window","cls":"Hostile","speed":0,"chase":0,"dmg":22,"detect":2.4},"beast":{"name":"The Beast of Level 5","cls":"Hostile","speed":0.9,"chase":3.1,"dmg":38,"detect":13},"peripheral":{"name":"Peripheral","cls":"Passive","speed":0.6,"chase":0,"dmg":0,"detect":0},"puppet":{"name":"Stop-Motion Puppet","cls":"Hostile at night","speed":0.7,"chase":3.3,"dmg":24,"detect":14},"weaver":{"name":"The Weaver","cls":"Hostile","speed":1,"chase":4.6,"dmg":26,"detect":9},"coil":{"name":"The Coil","cls":"Lethal","speed":1.2,"chase":3.4,"dmg":34,"detect":11},"goodboy":{"name":"The Good Boy","cls":"Apex Hostile","speed":1.8,"chase":6.2,"dmg":42,"detect":18},"murder":{"name":"The Murder","cls":"Hostile","speed":2.4,"chase":4.2,"dmg":9,"detect":26},"ninelives":{"name":"Nine Lives","cls":"Lethal / Apex","speed":1.6,"chase":3.8,"dmg":55,"detect":24},"revenant":{"name":"The Revenant","cls":"Hostile / Ethereal","speed":0.7,"chase":2.4,"dmg":38,"detect":35},"porcelain":{"name":"Porcelain","cls":"Hostile","speed":0,"chase":5.2,"dmg":20,"detect":40},"showman":{"name":"The Showman","cls":"Hostile","speed":1.2,"chase":3.8,"dmg":32,"detect":20},"jester":{"name":"Giggles","cls":"Lethal","speed":1.6,"chase":5.4,"dmg":28,"detect":16},"mourner":{"name":"The Restless Dead","cls":"Hostile","speed":1.1,"chase":3.6,"dmg":22,"detect":8},"phlebotomist":{"name":"The Phlebotomist","cls":"Hostile","speed":1.1,"chase":3.7,"dmg":16,"detect":12},"lure":{"name":"The Lure","cls":"Lethal","speed":0.7,"chase":1.6,"dmg":42,"detect":30},"palestag":{"name":"The Pale Stag","cls":"Lethal","speed":1.3,"chase":5.8,"dmg":36,"detect":40},"updraft":{"name":"The Updraft","cls":"Lethal (indirectly)","speed":1.6,"chase":2.8,"dmg":0,"detect":30},"colossus":{"name":"The Colossus","cls":"Lethal","speed":3,"chase":3,"dmg":55,"detect":999},"squeeze":{"name":"The Squeeze","cls":"Hostile","speed":1,"chase":5.6,"dmg":26,"detect":10},"horizon":{"name":"The Horizon Man","cls":"Lethal","speed":2.4,"chase":2.4,"dmg":60,"detect":999},"absence":{"name":"The Absence","cls":"Hostile","speed":0.8,"chase":1.25,"dmg":24,"detect":999},"deephand":{"name":"The Deep Hand","cls":"Lethal (indirectly)","speed":0,"chase":0,"dmg":18,"detect":6},"onlooker":{"name":"The Onlooker","cls":"Hostile","speed":0,"chase":4.6,"dmg":34,"detect":999},"someone":{"name":"Someone","cls":"Lethal","speed":1.2,"chase":5.2,"dmg":38,"detect":14},"hive":{"name":"The Hive","cls":"Hostile","speed":1,"chase":3.3,"dmg":18,"detect":12},"umbra":{"name":"The Umbra","cls":"Lethal","speed":1,"chase":4.6,"dmg":30,"detect":14},"reflection":{"name":"Your Reflection","cls":"Hostile","speed":0,"chase":0,"dmg":30,"detect":999},"examiner":{"name":"The Examiner","cls":"Hostile","speed":0.9,"chase":2.8,"dmg":30,"detect":9},"flawless":{"name":"The Flawless","cls":"Hostile","speed":0.8,"chase":3.9,"dmg":26,"detect":999},"arbiter":{"name":"The Arbiter","cls":"Lethal","speed":1,"chase":4.4,"dmg":34,"detect":999},"sandman":{"name":"The Sandman","cls":"Lethal","speed":0,"chase":3.2,"dmg":40,"detect":999},"thorn":{"name":"The Thornbound","cls":"Hostile","speed":1.1,"chase":3.4,"dmg":22,"detect":11},"formless":{"name":"The Formless","cls":"Lethal","speed":1.2,"chase":4,"dmg":30,"detect":16},"dread":{"name":"The Dread","cls":"Lethal","speed":1,"chase":3,"dmg":30,"detect":18},"phantom":{"name":"Phantom","cls":"Passive","speed":0.5,"chase":0,"dmg":0,"detect":0},"stranger":{"name":"The Strangers","cls":"Hostile in numbers","speed":0,"chase":1.7,"dmg":0,"detect":999},"hourman":{"name":"The Hour Man","cls":"Lethal","speed":1,"chase":1.6,"dmg":45,"detect":999},"counter":{"name":"The Counter","cls":"Lethal","speed":0,"chase":5,"dmg":36,"detect":999},"glitch":{"name":"Corrupted","cls":"Hostile","speed":0,"chase":0,"dmg":28,"detect":999},"stormcaller":{"name":"The Stormcaller","cls":"Lethal","speed":2,"chase":4.2,"dmg":40,"detect":999},"frostbitten":{"name":"The Frostbitten","cls":"Hostile","speed":0.7,"chase":1.6,"dmg":26,"detect":10},"bleeder":{"name":"The Bleeder","cls":"Hostile","speed":1,"chase":3.5,"dmg":22,"detect":12},"bloom":{"name":"The Bloom","cls":"Hostile","speed":0,"chase":3.8,"dmg":28,"detect":999},"librarian":{"name":"The Librarian","cls":"Lethal","speed":0.8,"chase":4.4,"dmg":34,"detect":0},"overgrowth":{"name":"The Overgrowth","cls":"Hostile","speed":0.9,"chase":2.4,"dmg":20,"detect":14},"glutton":{"name":"The Glutton","cls":"Hostile","speed":0.9,"chase":3.4,"dmg":24,"detect":9},"rootwalker":{"name":"The Rootwalker","cls":"Lethal","speed":0,"chase":1.8,"dmg":38,"detect":999},"supervisor":{"name":"The Supervisor","cls":"Hostile","speed":1,"chase":3.9,"dmg":30,"detect":0},"mut_chorus":{"name":"The Chorus","cls":"Hostile","speed":0.9,"chase":2.3,"dmg":40,"detect":8},"mut_splice":{"name":"The Splice","cls":"Hostile","speed":1.1,"chase":3,"dmg":34,"detect":12},"mut_thicket":{"name":"The Thicket","cls":"Lethal","speed":0.9,"chase":3.6,"dmg":45,"detect":28},"mut_sprawl":{"name":"The Sprawl","cls":"Lethal","speed":1.4,"chase":6.2,"dmg":26,"detect":14},"mut_fractured":{"name":"The Fractured","cls":"Hostile","speed":0,"chase":5.6,"dmg":32,"detect":24},"mut_drowned":{"name":"The Drowned Howler","cls":"Hostile","speed":1.3,"chase":4.6,"dmg":32,"detect":9},"pg_lifeguard":{"name":"The Lifeguard","cls":"Hostile","speed":1.1,"chase":3.1,"dmg":30,"detect":13},"pg_mascot":{"name":"The Mascot","cls":"Lethal","speed":0.9,"chase":3.5,"dmg":45,"detect":28},"pg_attendant":{"name":"The Attendant","cls":"Hostile","speed":0,"chase":5.6,"dmg":30,"detect":24},"pg_bouncer":{"name":"The Bouncer","cls":"Lethal","speed":1.4,"chase":6.3,"dmg":25,"detect":14},"pg_ringmaster":{"name":"The Ringmaster","cls":"Hostile","speed":1.3,"chase":4.7,"dmg":30,"detect":9}}};
 
 // ------------------------------------------------------------------ shorthand
 const $ = (id) => document.getElementById(id);
@@ -283,6 +287,9 @@ const num = (id) => parseFloat($(id).value) || 0;
 const small = (n) => String(parseFloat(Number(n).toPrecision(6)));
 const clampRange = (v, a, b) => Math.min(b, Math.max(a, v));
 
+// every creature id that loaded (entities/loader.js), and the folder (pack) it came from
+const LE = window.LabEntities || { ids: () => [], packOf: {}, files: {} };
+const knownIds = () => new Set(LE.ids().concat(Object.keys(ED)));
 const CLASSES = (GAME.classes && GAME.classes.length) ? GAME.classes : ['Passive', 'Hostile', 'Lethal'];
 const FLAGS = [
   ['passive', 'never attacks; wanders about'],
@@ -1042,7 +1049,7 @@ function buildFile() {
 // ------------------------------------------------------------------ checks + output
 function problems(built) {
   const out = [];
-  if (GAME.entities.includes(built.id)) out.push('There is already a creature with the id "' + built.id + '" - pick another id.');
+  if (knownIds().has(built.id)) out.push('There is already a creature with the id "' + built.id + '" - pick another id.');
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(built.id)) out.push('The id should be letters, numbers, dashes or underscores only.');
   if (built.id.length < 3) out.push('The id is very short; you will have trouble finding it later.');
   if (num('chase') > 0 && num('detect') <= 0) out.push('It chases but cannot see anything: raise "sees you at".');
@@ -1058,29 +1065,42 @@ function problems(built) {
   return out;
 }
 
-// A creature file that loaded but is missing from the studios' pick list can never
-// be spawned by a level. This catches a file saved without finishing the steps above.
+// The pick lists of the level studio come straight from entities/loader.js now, so the
+// only way to miss a step is a file that registers half a creature: a model with no
+// stats (a level cannot spawn it) or stats with no model.
 function wiringProblems() {
-  const picked = new Set(GAME.entities);
-  return Object.keys(ED).filter((id) => !ED[id].phobia && !picked.has(id));
+  const M2 = M['src/entities/registry.js'];
+  const out = [];
+  for (const id of LE.ids()) {
+    if (!M2.BUILDERS[id]) out.push(id + ' has stats but no model (BUILDERS.' + id + ')');
+    else if (!ED[id]) out.push(id + ' has a model but no stats (ENTITY_DEFS.' + id + ')');
+  }
+  return out;
 }
 function renderWiring() {
   const missing = wiringProblems();
   const box = $('wire');
-  if (!missing.length) {
-    box.innerHTML = '<p class="ok">Every creature that just loaded is in the pick lists too - the game, the entity viewer, the level studio and the field guide all see them.</p>';
+  const by = {};
+  for (const id of LE.ids()) (by[LE.packOf[id]] = by[LE.packOf[id]] || []).push(id);
+  const counts = Object.keys(by).map((p) => '<code>' + p + '/</code> ' + by[p].length).join(', ');
+  if (!LE.ids().length) {
+    box.innerHTML = '<p class="warn">entities/loader.js did not report any creature (window.LabEntities is missing).</p>';
     return;
   }
-  box.innerHTML = '<p class="warn">' + missing.length + ' loaded creature(s) are missing from the studio pick lists, so a level cannot spawn them: <code>' + missing.join(', ') + '</code></p>' +
-    '<p class="hint">Add each id to the <code>"entities"</code> array of <code>GAME</code> in other/level-studio.html and other/entity-studio.html.</p>';
+  if (!missing.length) {
+    box.innerHTML = '<p class="ok">' + LE.ids().length + ' creatures loaded (' + counts + '). Every one of them is in the level studio\'s pick lists for the levels its folder allows.</p>';
+    return;
+  }
+  box.innerHTML = '<p class="warn">' + missing.length + ' creature(s) are only half registered, so a level cannot spawn them:</p><ul class="warn">' +
+    missing.map((m) => '<li><code>' + m + '</code></li>').join('') + '</ul>';
 }
 
 function update(reseed, quiet) {
   const built = buildFile();
   $('file').textContent = built.text;
-  $('path1').textContent = 'entities/' + built.fname;
-  $('line1').textContent = "    '" + built.fname + "',";
-  $('idline').textContent = '    "' + built.id + '",';
+  const pack = ($('pack') && $('pack').value) || 'base';
+  $('path1').textContent = 'entities/' + pack + '/' + built.fname;
+  $('line1').textContent = "    '" + pack + '/' + built.fname + "',";
   const probs = problems(built);
   $('problems').innerHTML = probs.length
     ? '<p class="warn">' + probs.length + ' thing(s) to check:</p><ul class="warn">' + probs.map((p) => '<li>' + p + '</li>').join('') + '</ul>'
@@ -1105,11 +1125,6 @@ $('copy').addEventListener('click', () => {
   setTimeout(() => { $('copy').textContent = 'Copy the file'; }, 1200);
 });
 $('copyline').addEventListener('click', () => navigator.clipboard.writeText($('line1').textContent));
-$('copyid').addEventListener('click', () => {
-  navigator.clipboard.writeText($('idline').textContent);
-  $('copyid').textContent = 'Copied';
-  setTimeout(() => { $('copyid').textContent = 'Copy the id line'; }, 1200);
-});
 $('reseed').addEventListener('click', () => update(true));
 $('rebuild').addEventListener('click', () => update(false));
 $('paintmode').addEventListener('change', () => {

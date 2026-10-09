@@ -13,8 +13,10 @@ node tools/playtest/menu.mjs          # start screen, pack dock, level grid, ent
 node tools/playtest/play.mjs          # enter two levels of every pack and play them through
 node tools/playtest/play.mjs pg02     # one level
 node tools/playtest/play.mjs corruption   # one pack
-node tools/playtest/play.mjs all      # all 135 levels (slow: ~20 s each)
+node tools/playtest/play.mjs all      # all 138 levels (slow: ~20 s each)
 node tools/playtest/stairs.mjs        # climb every Playground stair shaft to the door at the top
+node tools/playtest/rides.mjs         # carousels turn you, escalators carry you, every slide ending, mall floors
+node tools/playtest/stages.mjs        # stairwell levels, followers, checkpoints, next, ceiling walking, painted maps
 node tools/playtest/studios.mjs       # other/level-studio.html, entity-studio.html, entity-viewer.html
 ```
 
@@ -31,11 +33,14 @@ node tools/levelcheck/check.mjs && node tools/playtest/menu.mjs && node tools/pl
 | `menu.mjs` | boot, the start screen, installing every bonus pack from the dock, the level grid of each pack (one card per level), entering a level from the menu and quitting back |
 | `play.mjs` | `game.enter()` for real — world generation, lighting bake, loot planning, goal placement, entities — then walks the objective chain: stand at each goal, use it, wait for the stage to finish, and report anything thrown in a frame, a timer or an await |
 | `stairs.mjs` | walks every stair shaft from the bottom landing to the door at the top, one short step at a time, and checks the player actually gains `flights x rise` metres |
-| `studios.mjs` | opens the two studios and the entity viewer, clicks every preset, and loads what they print back in (a level file has to register through `LabLevels.add`, an entity file has to evaluate against the game's entity code) |
+| `rides.mjs` | stands on a carousel and checks it carries the player round; stands on escalators and checks they carry the player up; rides one slide to each of its seven endings (three let you live); in a mall and a block of flats climbs every escalator / stair flight and checks it lands on the next gallery |
+| `stages.mjs` | a stairwell level starts inside the shaft, its landing door works, the follower catches a player who stands still, a landing checkpoint is where you respawn, a final stage with `next` carries you into the next level, the rubble in a corrupted level climbs onto a ceiling that holds you and its roof hatch ends the level, and a painted map makes its walls |
+| `studios.mjs` | opens the two studios and the entity viewer, clicks every preset, and loads what they print back in (a level file has to register through `LabLevels.add`, an entity file has to evaluate against the game's entity code); in the level studio it also paints walls and floor on the map editor, sets the spawn, places / drags / removes a creature with pointer events, and checks the file carries `layout`, `spawn` and `placed`, that *Play preview* opens `index.html#preview=` with that exact file, and that the file reads back in unchanged |
 
 `play.mjs` cannot solve puzzles that need real input — keypad codes, valves in a
-colour order, "pick the safe slide", "pick the window that leads home". Those
-stages are reported as `puzz … note: … (puzzle input)` and are not failures.
+colour order, "pick the window that leads home". Those stages are reported as
+`puzz … note: … (puzzle input)` and are not failures. A row of slides is ridden
+for real: the script reads which one is safe.
 
 ## The pieces
 
