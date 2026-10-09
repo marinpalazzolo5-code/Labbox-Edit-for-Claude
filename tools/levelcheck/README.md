@@ -31,6 +31,7 @@ creatures and the newer stage keys (`floor`, `checkpoint`, `endings`, `next`).
 | `snapshot.mjs` | rebuilds that snapshot from `index.html` at commit `f3ca628` (or `$LB_BEFORE`) |
 | `regen.mjs` | **rewrites** `levels/corrupt/` and `levels/playground/` from `data/*.json` and the original level data. Hand edits in those two folders are lost |
 | `bundle.mjs` | splits `index.html` into its modules so the generator code can run in Node |
+| `studiodata.mjs` | refreshes the level studio's copy of the levels (the *Copy the look of* list, the taken ids, each pack's file list) from `levels/` - run it after adding or changing a level |
 | `levelio.mjs` | reads one level file (evaluate it with a registry stub) and writes it back in the canonical format |
 | `cuts.mjs` | the cut maths, lifted out of the game, plus `cutSurvey()` for tools |
 | `data/` | the generator's inputs: `cuts.json`, `glitch.json`, `content.json`, `text.json`, the golden snapshot, and `intended.json` (the paths `verify.mjs` should ignore because they were changed on purpose) |
