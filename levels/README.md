@@ -11,6 +11,7 @@ levels/
   packs.js       one entry per pack: name, blurb, and the list of level files
   base/          the base campaign        (31 levels)
   phobia/        The Phobia Wing          (44 levels + _pack.js)
+  hell/          Hell                     (3 levels)
   corrupt/       Corruption               (30 levels)
   playground/    Playground               (30 levels + _pack.js)
 ```
@@ -22,7 +23,8 @@ need beyond the base game — furniture sets, item names, materials. Look at
 ## The fastest way in
 
 * **Making a level:** open `other/level-studio.html` in a browser. Pick a preset,
-  move the sliders, press *Download*, drop the file in the pack folder and add its
+  move the sliders, paint walls and place creatures on the *Map*, press *Play
+  preview* to walk round it in the game straight away, then *Download*, drop the file in the pack folder and add its
   name to that pack's `files: [...]` list in `packs.js`. The studio prints the
   exact line to add.
 * **Looking at a level's shape:** `node tools/levelcheck/cutcheck.mjs corrupt`
@@ -82,9 +84,46 @@ next to you: open any file in `levels/base/` and read the value.
 
 | type | what it makes | main params |
 | --- | --- | --- |
-| `lobby` | indoor rooms and corridors, lamps, props, holes in the ceiling | `height`, `wallMat`, `floorMat`, `ceilMat`, `fixtureMat`, `frameMat`, `fixtureColor`, `fixtureIntensity`, `density`, `roomChance`, `pillarChance`, `doorwayChance`, `deadChance`, `flickerChance`, `strobeChance`, `dyingChance`, `darkZones`, `missingTileChance`, `props`, `corridor`, `flood`, `overgrown`, `cracked`, `damp`, `decals`, `featureWeights`, `allDark`, `cuts` |
+| `lobby` | indoor rooms and corridors, lamps, props, holes in the ceiling | `height`, `wallMat`, `floorMat`, `ceilMat`, `fixtureMat`, `frameMat`, `fixtureColor`, `fixtureIntensity`, `density`, `roomChance`, `pillarChance`, `doorwayChance`, `deadChance`, `flickerChance`, `strobeChance`, `dyingChance`, `darkZones`, `missingTileChance`, `props`, `corridor`, `flood`, `overgrown`, `cracked`, `damp`, `decals`, `featureWeights`, `allDark`, `cuts`, `layout`, `ceilingWalk` |
 | `forest` | trees, bushes, a lamp or two | `treeChance`, `lampChance`, `leaves`, `floorMat` |
 | `open` | one of the outdoor places | `mode` = `suburbs`, `city`, `field`, `cave`, `hills`, `courtyard`, `heights`, `lot`, `ocean`; `style`, `broken` |
+| `open`, `mode: 'mall'` | a 3–6 storey mall round an atrium (see below) | `floors`, `fountain`, `storey` |
+| `open`, `mode: 'apartment'` | a 3–6 storey block of flats round a light well | `floors`, `fountain`, `storey` |
+| `open`, `mode: 'stairwell'` | nothing but the stairwell: the level is one long climb | — (the stairs come from the stage, see below) |
+
+#### Malls and apartment blocks (`mode: 'mall'` / `'apartment'`)
+
+A real building stands at x, z from 0 to 64 m (a mall) or 48 m (flats), with a
+car park round it you can see through the windows. Shops (or flats) line the
+outside walls; a gallery runs round the atrium on every floor behind a glass
+railing; escalators that really run (or, in the flats, stairs) climb across the
+atrium from floor to floor; a fountain at the bottom (`fountain: false` for
+none) and a skylight on top. Empty shelves and racks in the shops, beds and sofas
+in the flats, posters on the piers, palms and benches round the atrium.
+
+* `floors`: 3–6 (mall 4, apartment 5); `storey`: metres per floor (4.5 / 3.2).
+* put the `spawn` on the ground-floor gallery: `[16.5, 30]` in a mall, `[11, 24]`
+  in a block of flats.
+* give a stage `floor: n` (0 = ground) to put its target on that floor: wall goals
+  hang on the shop piers or, for doors and elevators, on the outside wall inside
+  a shop; everything else stands inside a shop.
+* creatures live on floors too: they fall through the atrium, take the stairs to
+  your floor when you are out of sight, and cannot reach you through a floor.
+
+`levels/base/12-level20-the-mall.js` (ride up, fetch the key, come back down) and
+`levels/playground/omega-23-the-elevator-atrium.js` are examples.
+
+#### Painted maps (`layout`) and walking on the ceiling (`ceilingWalk`)
+
+`gen.params.layout` is the map painted in the level studio: one string per row
+of 2 m cells from the world origin (row = z cell, column = x cell). `#` is a
+block of wall, `.` (or `S`) is open floor, `?` lets the generator decide. Only
+the `lobby` generator reads it.
+
+`gen.params.ceilingWalk: true` (lobby) is for corrupted levels: by the spawn the
+ceiling has fallen in over a heap of rubble you can climb, the top of the ceiling
+holds your weight, nothing below can follow you up, and a roof hatch somewhere up
+there is a shortcut out of the level. Δ-01, Δ-06 and Δ-23 have it.
 
 Material names (`wallMat`, `props`, …) are the ones in `other/level-studio.html`'s
 dropdowns — the studio only offers names that exist.
@@ -131,7 +170,7 @@ The Playground rides are ordinary props with these names: `turnstile`,
 ### `stages`: what to do
 
 Each stage is one objective. `goal` is the thing to reach or use
-(`door_exit`, `stairs`, `stairshaft`, `slide`, `generator`, `valve`, `lantern`,
+(`door_exit`, `stairs`, `stairshaft`, `escalator`, `slide`, `generator`, `valve`, `lantern`,
 `medkit`, `elevator`, `keypad`, `hatch`, `cake`, `musicbox`, `terminal`, `bell`,
 `breaker`, `artifact`, `anchor`, `note`, `vending`, `portal_window`, and the
 doors). Useful keys:
@@ -153,9 +192,49 @@ doors). Useful keys:
 | `from: 'prev'`, `reuse` | place this target at the previous stage's target |
 | `survive`, `rideTime`, `pickSafe`, `order`, `code`, `corridor` | special stage types — copy one from an existing level |
 | `effects` | things that happen at the stage: `alarm`, `message`, `night`, `powercut`, `rage`, `spawn` |
+| `floor` | in a mall / apartment level: which floor the target is on (0 = ground) |
+| `checkpoint` | transports (elevator, stairs, stairwell, escalator, slide, hatch) are respawn checkpoints once used; `false` turns that off |
+| `next` | on the final stage of a transport: carry the player straight into the level with this id |
+| `atSpawn`, `exits` | stairwell levels: put the shaft round the spawn; `exits: [8, 12]` puts a door on those landings |
+| `endings`, `clue` | slides: which bad endings the wrong slides may have, and which clue the note gives (`mark`, `noface`, `arrows`) |
 
 A level whose last stage is not `final: true` never ends — the studio warns about
 this.
+
+#### Staged levels and checkpoints
+
+Stages make a level a sequence: ride the escalators up, take the key, come back
+down to the exit. Using a transport (an elevator, the stairs, a stairwell, an
+escalator goal, a slide that let you live) sets a checkpoint, and so do stepping
+off a mall escalator onto a new floor and passing a stairwell landing with a door
+(or every fourth landing): if you die, you come back there, not at the spawn.
+A final stage with `next: 'pg11'` carries you straight on into that level.
+
+#### Slides
+
+A slide is only its mouth: a moulded plastic tube end standing out of a wall,
+sprayed round with tags, arrows and entity faces. With `pickSafe: true` and
+`count: 4` one of the row lets you live; a clue note near where the stage starts
+says which (the symbol over the hole, the only one without a face, or how many
+arrows point at it) - everything else painted there is a distraction. Inside, the
+tube is shiny striped plastic: daylight from the mouth fades within seconds and
+the flashlight is the only light. The safe slide ends at an exit door, a lobby
+or a hatch; the others end in a giant mouth, a grinder, a whirlpool or a drop
+(`endings: ['jaws', 'grinder']` picks which).
+
+#### Stairwell levels
+
+```js
+gen: { type: 'open', mode: 'stairwell', params: {} },
+stages: [{ text: 'Climb the stairwell', goal: 'stairshaft', flights: 16, rise: 2.8,
+           exits: [8, 12], atSpawn: true, dist: [0, 0], final: true }],
+follower: { type: 'pg_ringmaster', delay: 10 },
+```
+
+No maze: the level starts at the sealed foot of one long stairwell. A door on a
+landing in `exits` is a floor to get off at (it ends the level too), and
+`follower` is something that climbs exactly where you climbed, `delay` seconds
+behind - stand still and it closes the gap.
 
 ### `entities` and `rare`
 
@@ -166,8 +245,16 @@ entities: [['chase', 1, { delay: 2.5 }]],      // [id, how many, options] - opti
                                                // for special creatures; copy one that works
 ```
 
-The ids are the files in `entities/` without the `.js` (`entities/smiler.js` →
-`'smiler'`). Add your own with `other/entity-studio.html`.
+The ids are the files in `entities/<pack>/` without the `.js` (`entities/base/smiler.js`
+→ `'smiler'`). Creatures in `entities/base/` can go in any level; a creature in a
+pack's own folder (`entities/playground/`, `entities/phobia/`, ...) only in that
+pack's levels - `tools/levelcheck/check.mjs` and the level studio both enforce it.
+Add your own with `other/entity-studio.html`.
+
+```js
+placed: [['smiler', 17, 17]],                  // fixed spots in metres (the studio's map)
+follower: { type: 'chase', delay: 8 },         // walks your own footsteps, delay seconds behind
+```
 
 ## Holes in the floor: `cuts`
 
