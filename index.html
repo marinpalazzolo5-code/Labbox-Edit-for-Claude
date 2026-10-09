@@ -11071,6 +11071,16 @@ const PROPS = {
         for (const [k, r0, r1, y0] of [['art_a', 3.24, 2.5, 3.32], ['art_b', 2.5, 1.7, 3.5], ['art_c', 1.7, 0.9, 3.68], ['art_d', 0.9, 0.3, 3.86]]) {
           cyl(b, k, m, 0, y0, 0, r0, 0.18, 32, { rTop: r1, caps: false });
         }
+        // the underside of the canopy: what the riders look up at, painted in sunburst panels
+        for (let i = 0; i < 16; i++) {
+          const a0 = (i / 16) * Math.PI * 2, a1 = ((i + 1) / 16) * Math.PI * 2, r0 = 0.62, r1 = 3.26, y = 3.34;
+          const P = (a, r) => new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r).applyMatrix4(m);
+          const A = P(a0, r0), B = P(a1, r0), Cc = P(a1, r1);
+          // a quad facing down: origin A, u = A->B (inner edge), v = toward the rim
+          const D = P(a0, r1);
+          b.quad(i % 2 ? 'gallery_red' : 'fabric_white', A.x, A.y, A.z, D.x - A.x, D.y - A.y, D.z - A.z, B.x - A.x, B.y - A.y, B.z - A.z, { uv: 'unit' });
+          void Cc;
+        }
         cyl(b, trim, m, 0, 3.98, 0, 0.32, 0.22, 12);
         sphereAt(b, trim, m, 0, 4.32, 0, 0.16);
         cyl(b, trim, m, 0, 4.42, 0, 0.02, 0.5, 6);
@@ -13216,13 +13226,15 @@ class Goal {
     const throat = canvasTex(64, 256, (g, w, h) => {
       const gr = g.createLinearGradient(0, 0, 0, h);
       const c = '#' + cols[hue].toString(16).padStart(6, '0');
-      gr.addColorStop(0, '#000000'); gr.addColorStop(0.55, '#000000'); gr.addColorStop(0.9, c); gr.addColorStop(1, c);
+      // the top of the canvas is the mouth end of the tube, the bottom is deep inside
+      gr.addColorStop(0, c); gr.addColorStop(0.12, c); gr.addColorStop(0.5, '#000000'); gr.addColorStop(1, '#000000');
       g.fillStyle = gr; g.fillRect(0, 0, w, h);
       g.globalAlpha = 0.18; g.fillStyle = '#ffffff';
-      for (let y = h * 0.6; y < h; y += 22) g.fillRect(0, y, w, 3);
+      for (let y = 4; y < h * 0.4; y += 22) g.fillRect(0, y, w, 3);
     });
-    P.throat = this.add(xf(new THREE.CylinderGeometry(R, R, D + 0.1, 28, 1, true), { y: Y, z: (D - 0.1) / 2, rx: Math.PI / 2 }), new THREE.MeshBasicMaterial({ map: throat, side: THREE.BackSide }));
-    this.add(xf(new THREE.CircleGeometry(R, 28), { y: Y, z: -0.09 }), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+    P.throat = this.add(xf(new THREE.CylinderGeometry(R, R, D - 0.03, 28, 1, true), { y: Y, z: (D + 0.03) / 2, rx: Math.PI / 2 }), new THREE.MeshBasicMaterial({ map: throat, side: THREE.BackSide }));
+    // the far end of the throat: black, in front of the wall so nothing shows through
+    this.add(xf(new THREE.CircleGeometry(R, 28), { y: Y, z: 0.03 }), new THREE.MeshBasicMaterial({ color: 0x000000 }));
     // a scuffed plastic step under the mouth, the bolts of the flange and the slide's number
     this.box(plastic, -0.7, 0, 0, 0.7, 0.24, 0.95);
     this.box('rubber_black', -0.62, 0.24, 0.55, 0.62, 0.25, 0.92);
@@ -22921,10 +22933,10 @@ varying vec3 vW; varying vec3 vN; varying vec2 vUv;
 void main() {
   vec3 toP = vW - uCam; float d = length(toP); vec3 L = toP / max(d, 1e-4);
   vec3 N = normalize(vN); if (dot(N, L) > 0.0) N = -N;
-  float cone = smoothstep(0.78, 0.97, dot(L, uDir));
-  float att = 1.0 / (1.0 + 0.09 * d + 0.012 * d * d);
+  float cone = smoothstep(0.84, 0.97, dot(L, uDir));
+  float att = 1.0 / (1.0 + 0.12 * d + 0.03 * d * d);
   float lam = max(dot(N, -L), 0.0);
-  float flash = uFlash * (0.2 + 0.8 * cone) * att * (0.35 + 0.65 * lam) * 2.4;
+  float flash = uFlash * (0.06 + 0.94 * cone) * att * (0.35 + 0.65 * lam) * 1.7;
   float amb = uAmb / (1.0 + 0.05 * d);
   vec3 base = uTint;
   if (uStripes > 0.5) {
@@ -23033,7 +23045,9 @@ class Ride {
     this.clearEnd();
     const e = this.ending, p = this.at(this.L), g = new THREE.Group(), parts = this.endParts = {};
     g.position.set(p.x, p.y, p.z);
-    g.quaternion.setFromUnitVectors(this._fwd, this._t.set(p.tx, p.ty, p.tz).normalize());
+    // local +z along the tube, local +y as near to straight up as the tube allows (doors stand upright)
+    const zA = new THREE.Vector3(p.tx, p.ty, p.tz).normalize(), xA = new THREE.Vector3().crossVectors(this._up, zA).normalize(), yA = new THREE.Vector3().crossVectors(zA, xA);
+    g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xA, yA, zA));
     const add = (geo, mat, o = {}) => { const m = new THREE.Mesh(geo, mat); m.position.set(o.x || 0, o.y || 0, o.z || 0); if (o.rx) m.rotation.x = o.rx; if (o.ry) m.rotation.y = o.ry; if (o.rz) m.rotation.z = o.rz; m.frustumCulled = false; g.add(m); return m; };
     if (e === 'door' || e === 'lobby' || e === 'hatch') {
       // a cap on the tube with a bright way out in it
