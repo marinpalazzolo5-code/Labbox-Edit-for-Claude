@@ -48,7 +48,7 @@ for (const id of list) {
   game.entities.update = () => {};
 
   const world = game.world;
-  const B = world._bld;
+  const B = world.gen && world.gen.floors && world.gen.floors.count > 2 ? world._bld : null;
   if (B && B.climbs) {
     for (const c of B.climbs) {
       const y0 = c.f * B.SH, y1 = y0 + B.SH;

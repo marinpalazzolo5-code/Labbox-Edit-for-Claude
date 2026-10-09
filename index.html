@@ -7612,6 +7612,7 @@ class World {
     this.bucketSize = this.S;
     this.state = new Map();
     this.epoch = new Map();
+    this._bld = null;                     // a building plan belongs to one level (see open.js bldPlan)
     if (gen.init) gen.init(this, level);
     this.updateRenderRadius();
   }
