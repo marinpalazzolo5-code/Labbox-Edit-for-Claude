@@ -14946,8 +14946,8 @@ const MATS = {
   clay_leaf: { tex: 'clay', colA: [0.22, 0.52, 0.20], tile: 1.2, normalScale: 0.8, grime: 0.0 },
   paving: { tex: 'tiles', colA: [0.58, 0.55, 0.50], colB: [0.48, 0.46, 0.42], colC: [0.30, 0.28, 0.26], params: [3, 0.6, 0.06], tile: 2, normalScale: 0.8, grime: 0.5, wet: 0.5, hero: true },
   moon: { color: [1.0, 1.0, 1.0], roughness: 1, noTex: true },
-  glass: { glass: true, color: [0.9, 0.95, 0.95], roughness: 0.05, opacity: 0.18 },
-  glass_dirty: { glass: true, color: [0.8, 0.85, 0.8], roughness: 0.25, opacity: 0.35 },
+  glass: { glass: true, color: [0.62, 0.72, 0.72], roughness: 0.05, opacity: 0.14 },
+  glass_dirty: { glass: true, color: [0.5, 0.58, 0.54], roughness: 0.25, opacity: 0.24 },
   mirror: { color: [0.95, 0.95, 0.95], roughness: 0.02, metalness: 1, noTex: true },
   // ---------------------------------------------------------------- campaign levels
   party_wall: { tex: 'wallpaper', colA: [0.88, 0.70, 0.76], colB: [0.38, 0.58, 0.86], colC: [0.95, 0.86, 0.50], params: [1.4, 0.35], tile: 1.06, normalScale: 0.5, grime: 0.3, hero: true },
@@ -15061,7 +15061,9 @@ class MaterialLibrary {
       m = new THREE.MeshStandardMaterial({
         color: params.color, roughness: spec.roughness, metalness: 0,
         transparent: true, opacity: spec.opacity ?? 0.2, depthWrite: false,
+        side: THREE.DoubleSide, // a pane is seen from both sides
       });
+      m.polygonOffset = true; m.polygonOffsetFactor = 1; m.polygonOffsetUnits = 1; // never z-fight the frame it sits in
       patchWorldMaterial(m, { bake: mode });
       m.userData.spec = spec;
       m.envMapIntensity = 1.0;
