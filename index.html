@@ -829,7 +829,7 @@ const GRAPHICS_OPTIONS = [
   { key: 'chromaticAberration', label: 'Chromatic Aberration', type: 'range', min: 0, max: 1, step: 0.05 },
   { key: 'bloom', label: 'Bloom', type: 'enum', values: ['Off', 'Subtle', 'Full'] },
   { key: 'brightness', label: 'Brightness', type: 'range', min: 0.6, max: 1.6, step: 0.05 },
-  { key: 'showFps', label: 'Show FPS', type: 'bool' },
+  { key: 'showFps', label: 'Performance Stats (F3)', type: 'bool', note: 'Frame rate, 1% lows, a frame-time graph, hitch counts, draw calls, triangles, chunk streaming and memory.' },
   { key: 'adaptiveResolution', label: 'Adaptive Resolution', type: 'bool', note: 'Lowers the render resolution while the frame rate drops, then restores it. The cheapest way to kill stutter on a weak GPU.' },
 ];
 
@@ -1893,6 +1893,7 @@ const BINDINGS = {
   debug: ['F9'],
   quicksave: ['F5'],
   nightVision: ['KeyN'],
+  perf: ['F3'],
 };
 
 class Input {
@@ -1914,7 +1915,7 @@ class Input {
 
     window.addEventListener('keydown', (e) => {
       if (this.textCapture) return;
-      if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow') || e.code === 'F5') e.preventDefault();
+      if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow') || e.code === 'F5' || e.code === 'F3') e.preventDefault();
       if (!e.repeat) { this.down.add(e.code); this.pressed.add(e.code); }
     });
     window.addEventListener('keyup', (e) => {
@@ -7135,17 +7136,43 @@ const tmp = { x: 0, y: 0, z: 0 };
  * positions/normals: Float32Array(3n); out: baked Float32Array(3n), dynA/dynB Float32Array(4n)
  * ctx: { fixtures: [...], visible(ax,ay,az,bx,by,bz)->bool, ambient:[r,g,b], bounce:number, aoFn(x,y,z,nx,ny,nz)->number, sampleOffset(x,y,z,nx,ny,nz,out) }
  */
-function bakeVertices(positions, normals, sampleHints, ctx, baked, dynA, dynB) {
-  const n = positions.length / 3;
-  const fixtures = ctx.fixtures;
+const GRID_CELL = 8;
+
+/** Fixtures bucketed into 8 m cells so a vertex only looks at the lights that can reach it. */
+function fixtureGrid(ctx) {
+  if (ctx._grid) return ctx._grid;
+  const maxR2 = (ctx.maxRange ?? 16) ** 2;
+  const cells = new Map();
+  let reach = 0;
+  for (const fx of ctx.fixtures) {
+    const r = Math.sqrt(fx.range2 || maxR2);
+    if (r > reach) reach = r;
+    const k = Math.floor(fx.x / GRID_CELL) * 4096 + Math.floor(fx.z / GRID_CELL);
+    let c = cells.get(k);
+    if (!c) cells.set(k, c = []);
+    c.push(fx);
+  }
+  return (ctx._grid = { cells, reach });
+}
+
+/**
+ * Bakes vertices [from, to) and returns the index it stopped at. When ctx.deadline
+ * (a performance.now() time) passes it stops early so the caller can carry on
+ * next frame: chunks are baked in slices instead of one long stall.
+ */
+function bakeVertices(positions, normals, sampleHints, ctx, baked, dynA, dynB, from = 0, to = positions.length / 3) {
+  const grid = fixtureGrid(ctx);
   const amb = ctx.ambient || [0, 0, 0];
   const bounce = ctx.bounce ?? 0.3;
   const maxR = ctx.maxRange ?? 16;
   const maxR2 = maxR * maxR;
+  const deadline = ctx.deadline ?? Infinity;
+  const cand = ctx._cand || (ctx._cand = []);
   // Per-vertex scratch: best 4 (fixture, weight)
   const bestF = [null, null, null, null], bestW = new Float32Array(4);
 
-  for (let i = 0; i < n; i++) {
+  for (let i = from; i < to; i++) {
+    if ((i & 31) === 0 && i > from && deadline !== Infinity && performance.now() > deadline) return i;
     const i3 = i * 3;
     let px = positions[i3], py = positions[i3 + 1], pz = positions[i3 + 2];
     const nx = normals[i3], ny = normals[i3 + 1], nz = normals[i3 + 2];
@@ -7158,8 +7185,17 @@ function bakeVertices(positions, normals, sampleHints, ctx, baked, dynA, dynB) {
     bestF[0] = bestF[1] = bestF[2] = bestF[3] = null;
     bestW[0] = bestW[1] = bestW[2] = bestW[3] = 0;
 
-    for (let f = 0; f < fixtures.length; f++) {
-      const fx = fixtures[f];
+    // gather the fixtures near this vertex
+    cand.length = 0;
+    const gx0 = Math.floor((sx - grid.reach) / GRID_CELL), gx1 = Math.floor((sx + grid.reach) / GRID_CELL);
+    const gz0 = Math.floor((sz - grid.reach) / GRID_CELL), gz1 = Math.floor((sz + grid.reach) / GRID_CELL);
+    for (let gz = gz0; gz <= gz1; gz++) for (let gx = gx0; gx <= gx1; gx++) {
+      const c = grid.cells.get(gx * 4096 + gz);
+      if (c) for (let q = 0; q < c.length; q++) cand.push(c[q]);
+    }
+
+    for (let f = 0; f < cand.length; f++) {
+      const fx = cand[f];
       const lx = fx.x - sx, ly = fx.y - sy, lz = fx.z - sz;
       const d2 = lx * lx + ly * ly + lz * lz;
       const range2 = fx.range2 || maxR2;
@@ -7211,6 +7247,7 @@ function bakeVertices(positions, normals, sampleHints, ctx, baked, dynA, dynB) {
     dynB[i4] = bestF[2] ? bestF[2].slot : 0; dynB[i4 + 1] = bestW[2] * ao;
     dynB[i4 + 2] = bestF[3] ? bestF[3].slot : 0; dynB[i4 + 3] = bestW[3] * ao;
   }
+  return to;
 }
 
 /** Point-sample the light field (for dynamic objects / entities / AI light awareness). */
@@ -7475,6 +7512,15 @@ class GeometryBuilder {
    * Returns a THREE.Group.
    */
   finalize(bakeCtx, getMaterial, opts = {}) {
+    if (bakeCtx) bakeCtx.deadline = Infinity;
+    const it = this.finalizeIter(bakeCtx, getMaterial, opts);
+    let r;
+    do { r = it.next(); } while (!r.done);
+    return r.value;
+  }
+
+  /** Same as finalize() but yields whenever bakeCtx.deadline passes; the caller resumes it next frame. */
+  *finalizeIter(bakeCtx, getMaterial, opts = {}) {
     const group = new THREE.Group();
     for (const b of this.buckets.values()) {
       if (!b.count) continue;
@@ -7488,7 +7534,12 @@ class GeometryBuilder {
       if (b.kind === 'fixture') {
         geom.setAttribute('lslot', new THREE.BufferAttribute(new Float32Array(b.slot), 1));
       } else if (bakeCtx) {
-        bakeVertices(pos, nrm, new Float32Array(b.hint), bakeCtx, baked, dynA, dynB);
+        const hints = new Float32Array(b.hint);
+        let at = 0;
+        while (at < n) {
+          at = bakeVertices(pos, nrm, hints, bakeCtx, baked, dynA, dynB, at, n);
+          if (at < n) yield;
+        }
       }
       geom.setAttribute('baked', new THREE.BufferAttribute(baked, 3));
       geom.setAttribute('dynA', new THREE.BufferAttribute(dynA, 4));
@@ -7551,8 +7602,13 @@ class World {
     this.root.name = 'world';
     this.scene.add(this.root);
     this.layouts = new Map();
+    this.layoutIdx = new Map(); // numeric twin of `layouts`: the light bake asks for layouts millions of times
     this.chunks = new Map();
     this.buildQueue = [];
+    this.recheckT = 0;
+    this.chunksBuilt = 0;
+    this.buildMs = 0;
+    this.job = null;
     this.level = null;
     this.gen = null;
     this.seed = 0;
@@ -7593,10 +7649,13 @@ class World {
   }
 
   unload() {
+    this.cancelJob();
     for (const ch of this.chunks.values()) this.disposeChunk(ch);
     this.chunks.clear();
     for (const l of this.layouts.values()) this.releaseLayout(l);
     this.layouts.clear();
+    this.layoutIdx.clear();
+    this._el = null;
     this.buildQueue.length = 0;
     this.dynamicColliders.clear();
     if (this.gen && this.gen.dispose) this.gen.dispose(this);
@@ -7615,9 +7674,10 @@ class World {
 
   // ------------------------------------------------------------ layouts
   getLayout(cx, cz) {
-    const k = this.key(cx, cz);
-    let l = this.layouts.get(k);
+    const ik = (cx + 32768) * 65536 + (cz + 32768);
+    let l = this.layoutIdx.get(ik);
     if (l) return l;
+    const k = this.key(cx, cz);
     const x0 = cx * this.chunkSize, z0 = cz * this.chunkSize;
     l = {
       key: k, cx, cz, x0, z0, size: this.chunkSize,
@@ -7626,6 +7686,7 @@ class World {
       refs: 0, fixtureId: 0,
     };
     this.layouts.set(k, l);
+    this.layoutIdx.set((cx + 32768) * 65536 + (cz + 32768), l);
     this.gen.layout(this, l, this.rngFor(cx, cz));
     // lingering fog banks (Level 1's evaporating almond water, the bone fog of Level 7, caves)
     const fb = this.level && this.level.fogBanks;
@@ -7644,7 +7705,8 @@ class World {
     }
     return l;
   }
-  peekLayout(cx, cz) { return this.layouts.get(this.key(cx, cz)); }
+  peekLayout(cx, cz) { return this.layoutIdx.get((cx + 32768) * 65536 + (cz + 32768)); }
+  dropLayout(k, l) { this._el = null; this.layouts.delete(k); this.layoutIdx.delete((l.cx + 32768) * 65536 + (l.cz + 32768)); }
 
   /** A light that belongs to the level rather than a chunk (objective lamps). */
   addExtraFixture(fx) {
@@ -7667,14 +7729,16 @@ class World {
   getEdgeV(gx, gz) {
     const N = this.N;
     const cx = Math.floor(gx / N), cz = Math.floor(gz / N);
-    const l = this.getLayout(cx, cz);
+    let l = this._el;
+    if (!l || l.cx !== cx || l.cz !== cz) l = this._el = this.getLayout(cx, cz);
     if (!l.V) return 0;
     return l.V[(gx - cx * N) + (gz - cz * N) * N];
   }
   getEdgeH(gx, gz) {
     const N = this.N;
     const cx = Math.floor(gx / N), cz = Math.floor(gz / N);
-    const l = this.getLayout(cx, cz);
+    let l = this._el;
+    if (!l || l.cx !== cx || l.cz !== cz) l = this._el = this.getLayout(cx, cz);
     if (!l.H) return 0;
     return l.H[(gx - cx * N) + (gz - cz * N) * N];
   }
@@ -7725,7 +7789,7 @@ class World {
     const cz0 = this.chunkOf(minZ), cz1 = this.chunkOf(maxZ);
     for (let cz = cz0; cz <= cz1; cz++) {
       for (let cx = cx0; cx <= cx1; cx++) {
-        const l = this.layouts.get(this.key(cx, cz)) || this.getLayout(cx, cz);
+        const l = this.peekLayout(cx, cz) || this.getLayout(cx, cz);
         l.colliders.queryInto(minX, minZ, maxX, maxZ, out, stamp);
       }
     }
@@ -7759,7 +7823,7 @@ class World {
       list.length = 0;
       const cx0 = this.chunkOf(minX), cx1 = this.chunkOf(maxX), cz0 = this.chunkOf(minZ), cz1 = this.chunkOf(maxZ);
       for (let cz = cz0; cz <= cz1; cz++) for (let cx = cx0; cx <= cx1; cx++) {
-        const l = this.layouts.get(this.key(cx, cz));
+        const l = this.peekLayout(cx, cz);
         if (l) l.colliders.queryInto(minX, minZ, maxX, maxZ, list, stamp);
       }
       for (const c of this.dynamicColliders) {
@@ -7846,7 +7910,21 @@ class World {
     };
   }
 
+  /** Build a chunk right now (level entry, shifting levels). Streaming uses chunkJob() instead. */
   buildChunk(cx, cz) {
+    if (this.job && this.job.cx === cx && this.job.cz === cz) this.cancelJob();
+    const it = this.chunkJob(cx, cz, true);
+    let r;
+    do { r = it.next(); } while (!r.done);
+    return r.value;
+  }
+
+  /**
+   * A chunk build that can pause: it yields whenever this.job.deadline (a
+   * performance.now() time) passes, mid-way through the light bake, and the frame
+   * loop resumes it later. One chunk is ~500k light rays, far too much for one frame.
+   */
+  *chunkJob(cx, cz, sync = false) {
     const k = this.key(cx, cz);
     const l = this.getLayout(cx, cz);
     // neighbours must exist (their fixtures light us & their edges bound us)
@@ -7857,8 +7935,16 @@ class World {
     const builder = new GeometryBuilder(this.lib);
     const dynamic = new THREE.Group();
     const ctx = { dynamic, objects: [] };
+    if (this.job) this.job.ctx = ctx;
     this.gen.build(this, l, builder, ctx);
-    const group = builder.finalize(this.makeBakeCtx(l), (key) => this.lib.get(key, 'vertex'));
+    if (!sync) yield;
+    const bake = this.makeBakeCtx(l);
+    if (sync) bake.deadline = Infinity;
+    else Object.defineProperty(bake, 'deadline', { get: () => this.job ? this.job.deadline : Infinity });
+    const fin = builder.finalizeIter(bake, (key) => this.lib.get(key, 'vertex'));
+    let r;
+    while (!(r = fin.next()).done) yield;
+    const group = r.value;
     group.name = 'chunk ' + k;
     group.add(dynamic);
     this.root.add(group);
@@ -7866,6 +7952,18 @@ class World {
     this.chunks.set(k, ch);
     if (this.onChunkBuilt) this.onChunkBuilt(ch);
     return ch;
+  }
+
+  cancelJob() {
+    const j = this.job;
+    if (!j) return;
+    this.job = null;
+    try { j.gen.return(); } catch (e) { /* ignore */ }
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const nl = this.peekLayout(j.cx + dx, j.cz + dz);
+      if (nl) nl.refs--;
+    }
+    if (j.ctx) for (const o of j.ctx.objects) if (o.dispose) o.dispose();
   }
 
   disposeChunk(ch) {
@@ -7878,7 +7976,7 @@ class World {
     });
     this.root.remove(ch.group);
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
-      const nl = this.layouts.get(this.key(ch.cx + dx, ch.cz + dz));
+      const nl = this.peekLayout(ch.cx + dx, ch.cz + dz);
       if (nl) nl.refs--;
     }
     for (const o of ch.objects) if (o.dispose) o.dispose();
@@ -7890,8 +7988,7 @@ class World {
     if (ch) { this.disposeChunk(ch); this.chunks.delete(k); }
     if (newEpoch) {
       const l = this.layouts.get(k);
-      if (l && l.refs <= 0) { this.releaseLayout(l); this.layouts.delete(k); }
-      else if (l) { this.releaseLayout(l); this.layouts.delete(k); }
+      if (l) { this.releaseLayout(l); this.dropLayout(k, l); }
       this.epoch.set(k, (this.epoch.get(k) || 0) + 1);
     }
     return this.buildChunk(cx, cz);
@@ -7931,7 +8028,9 @@ class World {
     const cx = this.chunkOf(px), cz = this.chunkOf(pz);
     const R = this.renderRadius;
     // enqueue missing chunks
-    if (cx !== this.center.cx || cz !== this.center.cz || this.buildQueue.length === 0) {
+    this.recheckT -= dt;
+    if (cx !== this.center.cx || cz !== this.center.cz || (this.buildQueue.length === 0 && !this.job && this.recheckT <= 0)) {
+      this.recheckT = 0.5;
       this.center = { cx, cz };
       const q = [];
       for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
@@ -7951,7 +8050,7 @@ class World {
       for (const [k, l] of this.layouts) {
         if (l.refs <= 0 && (Math.abs(l.cx - cx) > R + 3 || Math.abs(l.cz - cz) > R + 3)) {
           this.releaseLayout(l);
-          this.layouts.delete(k);
+          this.dropLayout(k, l);
         }
       }
     }
@@ -7959,13 +8058,24 @@ class World {
     // frame is already slow (dt over ~18 ms) building more world is exactly the
     // wrong thing to spend time on, so the budget shrinks and the queue drains
     // over the next frames instead. Pop is used because shift() is O(n).
-    const budget = dt > 0.024 ? 3 : (dt > 0.018 ? 6 : BUILD_BUDGET_MS);
+    const budget = dt > 0.024 ? 2 : (dt > 0.018 ? 4 : BUILD_BUDGET_MS);
     const t0 = performance.now();
-    while (this.buildQueue.length) {
-      const [a, b] = this.buildQueue.pop();
-      if (!this.chunks.has(this.key(a, b))) this.buildChunk(a, b);
-      if (performance.now() - t0 > budget) break;
+    const deadline = t0 + budget;
+    this.buildMs = 0;
+    while (this.job || this.buildQueue.length) {
+      if (!this.job) {
+        const [a, b] = this.buildQueue.pop();
+        if (this.chunks.has(this.key(a, b))) continue;
+        this.job = { cx: a, cz: b, deadline, ctx: null, gen: null };
+        this.job.gen = this.chunkJob(a, b);
+      }
+      this.job.deadline = deadline;
+      let r;
+      try { r = this.job.gen.next(); } catch (e) { console.error('chunk build failed', e); this.cancelJob(); break; }
+      if (r.done) { this.job = null; this.chunksBuilt++; }
+      if (performance.now() >= deadline) break;
     }
+    this.buildMs = performance.now() - t0;
   }
 
   // ------------------------------------------------------------ persistent object state
@@ -8509,6 +8619,7 @@ class EntityManager {
   // ------------------------------------------------------------ frame
   update(dt) {
     this.time += dt;
+    this.pathsLeft = 2; // A* searches allowed this frame: a crowd all re-routing at once used to stall a frame
     const pl = this.player;
     const P = pl.pos;
     this.diff = difficulty();
@@ -8892,7 +9003,9 @@ class EntityManager {
     }
     e.repath = (e.repath || 0) - 1;
     if (e.path && e.path.length > 1 && e.repath > 0) return;
-    e.repath = 3;
+    if (this.pathsLeft <= 0 && e.path) return; // out of budget: keep walking the old route, search next frame
+    this.pathsLeft--;
+    e.repath = 6;
     const path = this.nav.findPath(e.pos.x, e.pos.z, tx, tz, 2200);
     if (path) e.path = path;
   }
@@ -20813,15 +20926,20 @@ const Snapshots = {
   /** Grab the frame that was just rendered (call right after engine.render()). */
   capture(canvas, levelId) {
     try {
-      const c = document.createElement('canvas'); c.width = 480; c.height = 270;
-      const g = c.getContext('2d');
       const w = canvas.width, h = canvas.height, ar = 16 / 9;
       let sw = w, sh = w / ar; if (sh > h) { sh = h; sw = h * ar; }
-      g.drawImage(canvas, (w - sw) / 2, (h - sh) / 2, sw, sh, 0, 0, 480, 270);
-      const d = g.getImageData(0, 0, 480, 270).data;
-      let sum = 0; for (let i = 0; i < d.length; i += 64) sum += d[i] + d[i + 1] + d[i + 2];
-      if (sum / (d.length / 64) < 18) return false; // pitch black: not worth keeping
-      this.put(levelId, c.toDataURL('image/jpeg', 0.72));
+      const sx = (w - sw) / 2, sy = (h - sh) / 2;
+      // brightness check on a 32x18 thumbnail: reading back 480x270 pixels mid-game is a visible hitch
+      const t = document.createElement('canvas'); t.width = 32; t.height = 18;
+      const tg = t.getContext('2d');
+      tg.drawImage(canvas, sx, sy, sw, sh, 0, 0, 32, 18);
+      const d = tg.getImageData(0, 0, 32, 18).data;
+      let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+      if (sum / (d.length / 4) < 18) return false; // pitch black: not worth keeping
+      const c = document.createElement('canvas'); c.width = 480; c.height = 270;
+      c.getContext('2d').drawImage(canvas, sx, sy, sw, sh, 0, 0, 480, 270);
+      // JPEG encoding and the localStorage write wait for an idle moment
+      setTimeout(() => { try { this.put(levelId, c.toDataURL('image/jpeg', 0.72)); } catch (e) { /* ignore */ } }, 400);
       return true;
     } catch (e) { return false; }
   },
@@ -21588,6 +21706,132 @@ class Bus {
   on(ev, fn) { if (!this.map.has(ev)) this.map.set(ev, new Set()); this.map.get(ev).add(fn); return () => this.map.get(ev).delete(fn); }
   emit(ev, data) { const s = this.map.get(ev); if (s) for (const fn of [...s]) { try { fn(data); } catch (e) { console.warn('bus', ev, e); } } }
 }
+
+/**
+ * Performance monitor. Always samples (a few performance.now() calls a frame); the panel is
+ * only built and drawn while Settings > Performance Stats is on, or F3 is pressed.
+ * Splits every frame into simulation, render submission and chunk streaming so a hitch
+ * can be blamed on something, and counts the hitches (frames over 33 ms / 50 ms / 100 ms).
+ */
+class PerfMonitor {
+  constructor(game) {
+    this.game = game;
+    this.N = 240;
+    this.ms = new Float32Array(this.N);
+    this.sim = new Float32Array(this.N);
+    this.rend = new Float32Array(this.N);
+    this.strm = new Float32Array(this.N);
+    this.i = 0;
+    this.frames = 0;
+    this.h33 = 0; this.h50 = 0; this.h100 = 0;   // hitches since the level started
+    this.worst = 0; this.worstAt = 0;
+    this.calls = 0; this.tris = 0;
+    this.shown = false;
+    this.el = null;
+    this.t = 0;
+  }
+
+  reset() { this.h33 = this.h50 = this.h100 = 0; this.worst = 0; this.frames = 0; this.ms.fill(0); this.sim.fill(0); this.rend.fill(0); this.strm.fill(0); }
+
+  setVisible(v) {
+    v = !!v;
+    if (v === this.shown) return;
+    this.shown = v;
+    const info = this.game.engine.renderer.info;
+    if (info) info.autoReset = !v;      // count every post-processing pass, not just the last one
+    if (v && !this.el) this.build();
+    if (this.el) this.el.style.display = v ? 'block' : 'none';
+  }
+
+  build() {
+    const el = document.createElement('div');
+    el.id = 'perf';
+    el.style.cssText = 'position:fixed;right:12px;top:12px;z-index:45;pointer-events:none;padding:8px 10px;background:rgba(0,0,0,0.66);' +
+      'border:1px solid rgba(233,196,106,0.25);border-radius:3px;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#d8d2bd;min-width:248px;display:none;';
+    this.text = document.createElement('div');
+    this.text.style.whiteSpace = 'pre';
+    this.cv = document.createElement('canvas');
+    this.cv.width = 240; this.cv.height = 56;
+    this.cv.style.cssText = 'display:block;margin-top:6px;width:240px;height:56px;';
+    el.appendChild(this.text); el.appendChild(this.cv);
+    document.body.appendChild(el);
+    this.el = el;
+    this.g = this.cv.getContext('2d');
+  }
+
+  /** Called once per frame with the raw frame interval and where the CPU time went. */
+  frame(raw, simMs, rendMs) {
+    const k = this.i;
+    this.ms[k] = raw; this.sim[k] = simMs; this.rend[k] = rendMs;
+    const w = this.game.world;
+    this.strm[k] = w ? w.buildMs || 0 : 0;
+    this.i = (k + 1) % this.N;
+    this.frames++;
+    if (this.frames > 3 && this.game.state === 'play') {
+      if (raw > 33.4) this.h33++;
+      if (raw > 50) this.h50++;
+      if (raw > 100) this.h100++;
+      if (raw > this.worst) { this.worst = raw; this.worstAt = this.game.levelTime || 0; }
+    }
+    if (!this.shown) return;
+    const info = this.game.engine.renderer.info;
+    if (info && info.render) { this.calls = info.render.calls; this.tris = info.render.triangles; info.reset(); }
+    this.draw();
+    this.t -= raw;
+    if (this.t <= 0) { this.t = 250; this.refresh(); }
+  }
+
+  draw() {
+    const g = this.g, W = 240, H = 56, N = this.N;
+    g.clearRect(0, 0, W, H);
+    const top = 50;                       // ms at the top of the graph
+    const y = (v) => H - Math.min(H, (v / top) * H);
+    g.fillStyle = 'rgba(255,255,255,0.05)'; g.fillRect(0, 0, W, H);
+    for (let n = 0; n < N; n++) {
+      const v = this.ms[(this.i + n) % N];
+      if (!v) continue;
+      g.fillStyle = v > 50 ? '#e0533d' : v > 33.4 ? '#e8a23a' : v > 18 ? '#d9d05a' : '#6fbf73';
+      const yy = y(v);
+      g.fillRect(n, yy, 1, H - yy);
+      const r = this.rend[(this.i + n) % N];       // render submission, drawn as a dark cap
+      if (r > 0) { g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(n, H - Math.min(H, (r / top) * H), 1, Math.min(H, (r / top) * H)); }
+    }
+    g.fillStyle = 'rgba(255,255,255,0.35)';
+    g.fillRect(0, y(16.7), W, 1); g.fillRect(0, y(33.3), W, 1);
+  }
+
+  refresh() {
+    const N = this.N, g = this.game;
+    let n = 0, sum = 0, max = 0, sim = 0, rend = 0, strm = 0, over = 0;
+    const tmp = this._tmp || (this._tmp = new Float32Array(N));
+    for (let k = 0; k < N; k++) {
+      const v = this.ms[k];
+      if (!v) continue;
+      tmp[n++] = v; sum += v; if (v > max) max = v; if (v > 33.4) over++;
+      sim += this.sim[k]; rend += this.rend[k]; strm += this.strm[k];
+    }
+    if (!n) return;
+    const sorted = tmp.subarray(0, n).sort();           // typed-array sort is numeric
+    const avg = sum / n;
+    const low1 = sorted.slice(Math.floor(n * 0.99)).reduce((a, b) => a + b, 0) / Math.max(1, n - Math.floor(n * 0.99));
+    const w = g.world, e = g.engine;
+    const mem = performance.memory ? (performance.memory.usedJSHeapSize / 1048576).toFixed(0) + ' MB' : 'n/a';
+    const info = e.renderer.info;
+    const f1 = (v) => v.toFixed(1);
+    const rows = [
+      `FPS ${(1000 / avg).toFixed(0).padStart(3)}   1% low ${(1000 / low1).toFixed(0).padStart(3)}   worst ${f1(max)} ms`,
+      `frame ${f1(avg)} ms   sim ${f1(sim / n)}   render ${f1(rend / n)}   stream ${f1(strm / n)}`,
+      `hitches  >33ms ${this.h33}   >50ms ${this.h50}   >100ms ${this.h100}   (${over} in window)`,
+      `worst this level ${f1(this.worst)} ms @ ${Math.floor(this.worstAt)}s`,
+      `draw calls ${this.calls}   tris ${(this.tris / 1000).toFixed(0)}k   res ${Math.round(e.dynScale * 100)}%`,
+      `geometries ${info.memory.geometries}   textures ${info.memory.textures}   programs ${info.programs ? info.programs.length : 0}`,
+      w && w.gen ? `chunks ${w.chunks.size}   queued ${w.buildQueue.length}${w.job ? ' (building)' : ''}   built ${w.chunksBuilt}` : 'chunks -',
+      `entities ${g.entities ? g.entities.list.length : 0}   fixtures ${g.lights ? g.lights.fixtures.size : 0}   heap ${mem}`,
+    ];
+    this.text.textContent = rows.join('\n');
+  }
+}
+
 // Entry point: builds the game, loads campaign levels (world, objectives,
 // loot, entities) and runs the frame loop, including death and respawn.
 
@@ -21769,6 +22013,8 @@ class Game {
       onPeek: () => this.bus.emit('peek'),
     });
     this.hud = new Hud(this);
+    this.perf = new PerfMonitor(this);
+    this.perf.setVisible(settings.get('showFps'));
     this.player = new Player(this);
     this.loot = new LootSystem(this);
     this.objectives = new Objectives(this);
@@ -21921,10 +22167,13 @@ class Game {
     this.phobia.setLevel(level);
     this.achievements.startRun(level);
     this.snapT = 4 + Math.random() * 30; this.snapped = false;
+    // compile every shader now, behind the loading screen, instead of stalling the first frame each one is seen
+    try { const r = this.engine.renderer; if (r.compile) r.compile(this.scene, this.engine.camera); } catch (e) { /* first sight will compile it */ }
     this.objectives.start();
     this.hud.updateKeys();
     this.levelTime = 0;
     this.deaths = 0;
+    this.perf.reset();
     this.ui.setProgress(1, 'Ready');
     // let the photograph be seen: loading never flashes by in under ~2.6 s
     while (performance.now() - shownAt < 2600) { await nextFrame(); if (this.level !== level) return; }
@@ -22055,6 +22304,7 @@ class Game {
   }
 
   onSettings(keys) {
+    if (keys.includes('showFps') || keys.includes('preset')) this.perf.setVisible(settings.get('showFps'));
     if (keys.includes('viewDistance') || keys.includes('preset')) this.world.updateRenderRadius();
     if (keys.includes('particles')) this.dust.setDensity(settings.get('particles') | 0);
   }
@@ -22105,7 +22355,10 @@ class Game {
 
   // ------------------------------------------------------------- frame
   loop(now) {
-    const dt = Math.min(0.05, Math.max(0.0001, (now - this.last) / 1000));
+    const tA = performance.now();
+    const raw = now - this.last;
+    if (this.last && raw < 1000 && input.hit('perf')) settings.set('showFps', !settings.get('showFps'));
+    const dt = Math.min(0.05, Math.max(0.0001, raw / 1000));
     this.last = now;
     this.time += dt;
     this.fps += ((1 / dt) - this.fps) * 0.08;
@@ -22155,7 +22408,10 @@ class Game {
     this.dust.update(dt, this.engine.camera.position);
     if (!playing) this.phobia.drawOverlay(dt);
     this.engine.update(dt, playing);
+    const tR = performance.now();
     this.engine.render();
+    const tE = performance.now();
+    if (this.last && raw < 1000) this.perf.frame(raw, tR - tA, tE - tR);
     // once per visit, keep a photograph of this place for the next loading screen
     if (playing && !this.snapped && this.levelTime > this.snapT) {
       const cam = this.engine.camera.position, pl = this.player;
