@@ -46,3 +46,15 @@ tints, glitch jitter) plus an `ENTITY_DEFS` entry copied from the base creature,
 behaviour flags (`watcher`, `crawler`, `statue`, `howl`, `darkOnly`, ...). They load after
 `core/phobia-finish.js`; add a new variant with the `variant(id, base, build, def, voice)` helper at the top
 of either file.
+
+## The Entity Studio
+
+`other/entity-studio.html` is a small modelling workspace (menu bar, toolbox, outliner, viewport, properties tabs, timeline) that
+writes one entity file for you:
+
+* **Toolbox / paint tools** - orbit, brush, spray, eraser, eyedropper and fill (`V B A E I U`). Paint is written into the creature's own
+  skin / cloth textures and shipped inside the file.
+* **Viewport** - orbit / pan / zoom, axis gizmo, front / side / top views, orthographic, clay and wireframe shading, grid, floor, height ruler,
+  reference human, shadows, turntable, lighting presets and PNG capture.
+* **Undo / redo** (`Ctrl+Z`, `Ctrl+Y`) covers sliders and paint alike; the last session is also kept in the browser.
+* **Round trip** - every file it writes ends with a `studio-state` comment, so **File > Open .js** restores all sliders and brush strokes.

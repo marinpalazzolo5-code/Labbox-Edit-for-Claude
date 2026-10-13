@@ -2,256 +2,244 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Labyrinth Box - Entity Studio</title>
 <style>
-  :root { --bg: #14130f; --panel: #1d1b16; --line: #33302a; --ink: #e8e2d4; --dim: #a29b8b; --gold: #e9c46a; --good: #7fd18a; --bad: #e2705e; --in: #24211b; }
+  :root {
+    --bg0: #161616; --bg1: #1f1f1f; --bg2: #282828; --bg3: #353535; --bg4: #444; --edge: #0b0b0b;
+    --ink: #e4e4e4; --dim: #9a9a9a; --acc: #4772b3; --acc2: #5b8ad0; --gold: #e9c46a;
+    --good: #7fd18a; --bad: #e2705e; --warn: #e8a23a; --in: #1a1a1a;
+    --ui: system-ui, "Segoe UI", Roboto, sans-serif; --mono: ui-monospace, Consolas, Menlo, monospace;
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, "Segoe UI", sans-serif; }
-  header { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 12px 16px; background: #191712; border-bottom: 1px solid var(--line); }
-  header h1 { margin: 0; font-size: 16px; letter-spacing: .06em; }
-  header .sub { color: var(--dim); font-size: 12px; }
-  main { display: grid; grid-template-columns: minmax(430px, 1fr) minmax(400px, 44%); gap: 16px; padding: 16px; align-items: start; }
-  @media (max-width: 1020px) { main { grid-template-columns: 1fr; } }
-  section, aside > div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--gold); margin: 0 0 10px; }
-  h3 { font-size: 12px; letter-spacing: .05em; color: var(--dim); margin: 14px 0 6px; text-transform: uppercase; }
-  label { display: block; font-size: 12px; color: var(--dim); margin-top: 8px; }
-  input[type=text], input[type=number], select, textarea { width: 100%; background: var(--in); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: 13px/1.4 ui-monospace, Consolas, monospace; }
-  textarea { min-height: 54px; resize: vertical; }
-  input[type=color] { background: var(--in); border: 1px solid var(--line); border-radius: 6px; height: 30px; width: 100%; padding: 2px; }
-  input[type=range] { width: 100%; }
-  button { background: #2c2922; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
-  button:hover { border-color: var(--gold); color: var(--gold); }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
-  .row > * { flex: 1 1 120px; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
-  .chk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); margin-top: 10px; }
-  .chk input { width: auto; }
-  .hint { color: var(--dim); font-size: 12px; margin: 6px 0 0; }
-  .small { font-size: 11px; color: var(--dim); }
-  .warn { color: var(--bad); font-size: 12px; margin: 6px 0 0; }
-  .ok { color: var(--good); font-size: 12px; margin: 6px 0 0; }
-  pre { background: #100f0c; border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto; max-height: 42vh; font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre; }
-  code { background: #100f0c; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font: 12px ui-monospace, Consolas, monospace; }
-  canvas { width: 100%; height: 340px; display: block; background: #0d0c0a; border: 1px solid var(--line); border-radius: 8px; cursor: grab; }
-  canvas.painting { cursor: crosshair; }
-  .steps ol { margin: 0; padding-left: 20px; font-size: 13px; }
-  .steps li { margin-bottom: 6px; }
-  .preset { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-  .preset button { flex: 1 1 132px; }
-  .badge { font: 11px ui-monospace, monospace; color: var(--gold); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg0); color: var(--ink); font: 12px/1.45 var(--ui); overflow: hidden; user-select: none; }
+  input, select, textarea, button { font: inherit; color: inherit; }
+  #app { display: grid; grid-template-rows: 30px 38px minmax(0, 1fr) 40px 24px; height: 100vh; }
+
+  /* ---------------------------------------------------------------- menu bar */
+  #menubar { display: flex; align-items: stretch; background: var(--bg1); border-bottom: 1px solid var(--edge); padding: 0 6px; gap: 2px; position: relative; z-index: 30; }
+  #menubar .brand { display: flex; align-items: center; gap: 7px; padding: 0 10px 0 4px; font-weight: 600; letter-spacing: .08em; color: var(--gold); white-space: nowrap; }
+  #menubar .brand i { width: 14px; height: 14px; border-radius: 3px; background: linear-gradient(135deg, var(--gold), #b5832a); display: inline-block; }
+  .mbtn { background: none; border: 0; padding: 0 10px; border-radius: 4px; cursor: pointer; }
+  .mbtn:hover, .mbtn.open { background: var(--bg4); }
+  .spacer { flex: 1; }
+  #menubar .chip { align-self: center; margin-right: 6px; padding: 2px 9px; border-radius: 99px; background: var(--bg3); color: var(--dim); cursor: pointer; font-size: 11px; }
+  #menubar .chip.bad { background: #5a2a22; color: #ffb7a8; }
+  #menubar .chip.good { background: #25422b; color: #a8e6b0; }
+  .primary { background: var(--acc); border: 0; border-radius: 4px; padding: 0 14px; align-self: center; height: 22px; cursor: pointer; font-weight: 600; }
+  .primary:hover { background: var(--acc2); }
+  .dd { position: absolute; top: 30px; min-width: 230px; background: var(--bg2); border: 1px solid var(--edge); border-radius: 6px; padding: 4px; box-shadow: 0 10px 28px rgba(0,0,0,.55); z-index: 50; }
+  .dd .it { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .dd .it:hover { background: var(--acc); }
+  .dd .it .k { margin-left: auto; color: var(--dim); font-size: 11px; padding-left: 20px; }
+  .dd .it:hover .k { color: #dfe8f7; }
+  .dd .it .ck { width: 12px; text-align: center; color: var(--gold); }
+  .dd .sep { height: 1px; background: var(--bg4); margin: 4px 2px; }
+
+  /* ---------------------------------------------------------------- option bar */
+  #optbar { display: flex; align-items: center; gap: 12px; padding: 0 10px; background: var(--bg2); border-bottom: 1px solid var(--edge); overflow: hidden; white-space: nowrap; }
+  #optbar .tname { font-weight: 600; color: var(--gold); min-width: 74px; }
+  #optbar .hintline { color: var(--dim); overflow: hidden; text-overflow: ellipsis; flex: 1 1 0; min-width: 0; }
+  #optbar .opts { flex: none; }
+  #optbar .opts { display: flex; align-items: center; gap: 10px; }
+  #optbar .opts .fld { width: 150px; }
+  #optbar .opts .fld.sel { width: 176px; }
+  #optbar .swatchwrap { display: flex; align-items: center; gap: 6px; }
+
+  /* ---------------------------------------------------------------- work area */
+  #work { display: grid; grid-template-columns: 44px 224px minmax(280px, 1fr) 356px; min-height: 0; }
+  @media (max-width: 1180px) { #work { grid-template-columns: 44px minmax(260px, 1fr) 330px; } #left { display: none; } }
+  @media (max-width: 820px) { body { overflow: auto; } #app { height: auto; grid-template-rows: 30px 38px auto 40px 24px; } #work { grid-template-columns: 44px 1fr; grid-template-rows: 60vh auto; } #props { grid-column: 1 / -1; max-height: none; } }
+
+  #toolbox { background: var(--bg1); border-right: 1px solid var(--edge); display: flex; flex-direction: column; align-items: center; padding: 6px 0; gap: 3px; }
+  .tool { width: 34px; height: 34px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; display: grid; place-items: center; position: relative; color: #c8c8c8; }
+  .tool:hover { background: var(--bg3); }
+  .tool.on { background: var(--acc); color: #fff; }
+  .tool svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .tool .kbd { position: absolute; right: 2px; bottom: 0; font-size: 8px; color: var(--dim); }
+  .tool.on .kbd { color: #dce7fa; }
+  #toolbox hr { width: 26px; border: 0; border-top: 1px solid var(--bg4); margin: 4px 0; }
+
+  #left { background: var(--bg1); border-right: 1px solid var(--edge); overflow: auto; min-height: 0; }
+  .panelhead { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg2); border-bottom: 1px solid var(--edge); font-weight: 600; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #cfcfcf; cursor: pointer; }
+  .panelhead::before { content: "\25BE"; color: var(--dim); font-size: 10px; }
+  .panelhead.shut::before { content: "\25B8"; }
+  .panelbody { padding: 4px 0 8px; }
+  .panelbody.shut { display: none; }
+  .row-o { display: flex; align-items: center; gap: 6px; padding: 2px 8px; cursor: pointer; min-height: 22px; border-radius: 3px; margin: 0 4px; }
+  .row-o:hover { background: var(--bg3); }
+  .row-o.sel { background: #3a4d6b; }
+  .row-o.dim { opacity: .45; }
+  .row-o .ico { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+  .row-o .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-o .eye { width: 16px; text-align: center; color: var(--dim); font-size: 11px; }
+  .row-o .eye.off { opacity: .35; }
+  .row-o .cnt { color: var(--dim); font-size: 10px; }
+  #presets { display: grid; grid-template-columns: 1fr; gap: 3px; padding: 4px 8px 6px; }
+  #presets button { text-align: left; background: var(--bg3); border: 0; border-radius: 4px; padding: 5px 9px; cursor: pointer; }
+  #presets button:hover { background: var(--acc); }
+
+  /* ---------------------------------------------------------------- viewport */
+  #viewwrap { position: relative; min-width: 0; min-height: 0; background: #111; overflow: hidden; }
+  #c { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; touch-action: none; cursor: grab; }
+  #c.paint { cursor: crosshair; }
+  #c.pick { cursor: copy; }
+  #c.grabbing { cursor: grabbing; }
+  #vhead { position: absolute; left: 8px; right: 8px; top: 8px; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none; }
+  #vhead > * { pointer-events: auto; }
+  .vgroup { display: flex; background: rgba(30,30,30,.82); border: 1px solid rgba(0,0,0,.6); border-radius: 6px; overflow: hidden; backdrop-filter: blur(4px); }
+  .vgroup button, .vgroup select { background: none; border: 0; padding: 4px 9px; cursor: pointer; border-right: 1px solid rgba(255,255,255,.06); }
+  .vgroup button:last-child { border-right: 0; }
+  .vgroup button:hover { background: rgba(255,255,255,.12); }
+  .vgroup button.on { background: var(--acc); color: #fff; }
+  .vgroup select { background: transparent; padding: 3px 4px; width: auto; min-width: 118px; }
+  .vgroup select option { background: #2b2b2b; }
+  #gizmo { position: absolute; right: 10px; top: 52px; width: 96px; height: 96px; cursor: pointer; }
+  #vfoot { position: absolute; left: 10px; right: 10px; bottom: 8px; display: flex; justify-content: space-between; gap: 12px; color: rgba(255,255,255,.62); font-size: 11px; pointer-events: none; text-shadow: 0 1px 3px #000; }
+  #vtoast { position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%); background: rgba(20,20,20,.9); border: 1px solid var(--bg4); padding: 5px 14px; border-radius: 99px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #vtoast.on { opacity: 1; }
+  #novgl { position: absolute; inset: 0; display: none; place-items: center; text-align: center; color: var(--bad); padding: 30px; }
+
+  /* ---------------------------------------------------------------- properties */
+  #props { background: var(--bg1); border-left: 1px solid var(--edge); display: grid; grid-template-columns: 34px minmax(0, 1fr); min-height: 0; }
+  #tabs { background: var(--bg0); display: flex; flex-direction: column; padding-top: 6px; gap: 2px; }
+  .tab { height: 34px; border: 0; background: none; cursor: pointer; display: grid; place-items: center; color: #aaa; border-left: 3px solid transparent; }
+  .tab:hover { background: var(--bg2); color: #fff; }
+  .tab.on { background: var(--bg1); color: #fff; border-left-color: var(--acc2); }
+  .tab svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  #tabbody { overflow: auto; min-height: 0; }
+  .tabpane { display: none; padding-bottom: 20px; }
+  .tabpane.on { display: block; }
+  .tabtitle { padding: 8px 12px 4px; font-size: 14px; font-weight: 600; }
+  .tabsub { padding: 0 12px 6px; color: var(--dim); }
+  .grp { margin: 0 6px 6px; background: var(--bg2); border-radius: 6px; border: 1px solid var(--edge); }
+  .grp-h { padding: 5px 10px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .grp-h::before { content: "\25BE"; color: var(--dim); font-size: 10px; }
+  .grp-h.shut::before { content: "\25B8"; }
+  .grp-b { padding: 2px 8px 8px; }
+  .grp-b.shut { display: none; }
+  .fld { position: relative; display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 24px; margin-top: 3px; }
+  .fld > .lab { color: #bdbdbd; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fld.wide { grid-template-columns: 1fr; }
+  .fld.wide > .lab { text-align: left; }
+  .fld.slider { display: block; height: 22px; background: var(--bg4); border-radius: 4px; overflow: hidden; margin-top: 4px; }
+  .fld.slider .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--acc); width: 50%; pointer-events: none; }
+  .fld.slider .lab, .fld.slider .val { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; padding: 0 9px; pointer-events: none; text-shadow: 0 1px 2px rgba(0,0,0,.5); }
+  .fld.slider .lab { left: 0; text-align: left; color: #f0f0f0; }
+  .fld.slider .val { right: 0; font-family: var(--mono); font-size: 11px; }
+  .fld.slider input[type=range] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
+  .fld.slider:hover { background: #505050; }
+  .fld.slider .edit { position: absolute; inset: 0; width: 100%; border: 1px solid var(--acc2); border-radius: 4px; background: var(--in); text-align: center; font-family: var(--mono); }
+  input[type=text], input[type=number], select, textarea { width: 100%; background: var(--in); border: 1px solid var(--bg4); border-radius: 4px; padding: 3px 7px; min-height: 22px; user-select: text; }
+  input[type=text]:focus, input[type=number]:focus, select:focus, textarea:focus { outline: 1px solid var(--acc2); border-color: var(--acc2); }
+  textarea { min-height: 58px; resize: vertical; font-family: var(--ui); }
+  select { padding: 2px 4px; }
+  .colorf { display: flex; align-items: center; gap: 7px; }
+  .colorf input[type=color] { width: 38px; height: 22px; padding: 0; border: 1px solid var(--edge); border-radius: 4px; background: none; cursor: pointer; flex: none; }
+  .colorf code { font-family: var(--mono); color: var(--dim); font-size: 11px; }
+  .chkf { display: flex; align-items: center; gap: 8px; min-height: 24px; margin-top: 3px; cursor: pointer; }
+  .chkf input { accent-color: var(--acc2); margin: 0 0 0 4px; }
+  .chkf small { color: var(--dim); }
+  .flaggrid { display: grid; grid-template-columns: 1fr; gap: 0; }
+  .btn { background: var(--bg4); border: 0; border-radius: 4px; padding: 4px 11px; cursor: pointer; min-height: 24px; }
+  .btn:hover { background: #575757; }
+  .btn.on { background: var(--acc); }
+  .btn.pri { background: var(--acc); font-weight: 600; }
+  .btn.pri:hover { background: var(--acc2); }
+  .btn.dng:hover { background: #8a3a2f; }
+  .btnrow { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .note { color: var(--dim); margin: 5px 2px; }
+  .note b { color: #cfcfcf; font-weight: 600; }
+  .warn { color: var(--bad); } .ok { color: var(--good); }
+  ul.plist { margin: 4px 0 0; padding-left: 18px; } ul.plist li { margin: 3px 0; }
+  pre { background: #101010; border: 1px solid var(--edge); border-radius: 6px; padding: 8px; overflow: auto; max-height: 340px; font: 11px/1.45 var(--mono); user-select: text; margin: 6px 0 0; white-space: pre; }
+  code { background: #101010; border: 1px solid var(--edge); border-radius: 4px; padding: 0 5px; font: 11px var(--mono); user-select: text; }
+  ol.steps { margin: 4px 0 0; padding-left: 18px; } ol.steps li { margin: 6px 0; }
+  .pal { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin-top: 6px; }
+  .pal i { aspect-ratio: 1; border-radius: 4px; cursor: pointer; border: 1px solid rgba(0,0,0,.6); display: block; }
+  .pal i:hover { outline: 2px solid #fff; }
+  .strokes .srow { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 4px; }
+  .strokes .srow:hover { background: var(--bg3); }
+  .badge { font: 11px var(--mono); color: var(--gold); background: #101010; border-radius: 99px; padding: 1px 9px; }
+
+  /* ---------------------------------------------------------------- timeline + status */
+  #timeline { display: flex; align-items: center; gap: 10px; padding: 0 10px; background: var(--bg1); border-top: 1px solid var(--edge); overflow: hidden; white-space: nowrap; }
+  #timeline .seg { display: flex; background: var(--bg3); border-radius: 5px; overflow: hidden; }
+  #timeline .seg button { background: none; border: 0; padding: 4px 11px; cursor: pointer; }
+  #timeline .seg button:hover { background: #4a4a4a; }
+  #timeline .seg button.on { background: var(--acc); color: #fff; }
+  #timeline .fld { width: 150px; }
+  #statusbar { display: flex; align-items: center; gap: 14px; padding: 0 10px; background: var(--bg0); border-top: 1px solid var(--edge); color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; }
+  #statusbar #tip { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; place-items: center; z-index: 80; }
+  #modal.on { display: grid; }
+  #modal .card { width: min(560px, 92vw); max-height: 86vh; overflow: auto; background: var(--bg2); border: 1px solid var(--edge); border-radius: 10px; padding: 16px 20px; box-shadow: 0 20px 60px rgba(0,0,0,.7); user-select: text; }
+  #modal h3 { margin: 0 0 8px; font-size: 15px; }
+  #modal table { border-collapse: collapse; width: 100%; } #modal td { padding: 3px 6px; border-bottom: 1px solid var(--bg3); } #modal td:first-child { font-family: var(--mono); color: var(--gold); white-space: nowrap; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; } ::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 6px; border: 2px solid var(--bg1); } ::-webkit-scrollbar-track { background: transparent; }
 </style>
 </head>
 <body>
-<header>
-  <h1>LABYRINTH BOX &middot; ENTITY STUDIO</h1>
-  <span class="sub">build a creature with sliders and presets - the preview is live, the file writes itself</span>
-</header>
+<div id="app">
+  <div id="menubar">
+    <div class="brand"><i></i>ENTITY STUDIO</div>
+    <div id="menus"></div>
+    <div class="spacer"></div>
+    <span class="chip good" id="chip">checking&hellip;</span>
+    <button type="button" class="primary" id="dl">Download .js</button>
+  </div>
 
-<main>
-<div>
-  <section>
-    <h2>Start from a preset</h2>
-    <div class="preset" id="presets"></div>
-    <p class="hint">A preset fills in the whole creature. Change anything you like afterwards - the preview and the file follow along.</p>
-  </section>
+  <div id="optbar"></div>
 
-  <section>
-    <h2>1 &middot; The body</h2>
-    <div class="grid2">
-      <div><label>Stands like</label><select id="kind">
-        <option value="biped">a person (two legs)</option>
-        <option value="quad">a beast on all fours</option>
-      </select></div>
-      <div><label>Height in metres</label><input type="number" id="height" step="0.05" min="0.6" max="4" value="1.8"></div>
-      <div><label>Build <span class="small">slim &rarr; broad</span></label><input type="range" id="build" min="-1" max="1" step="0.05" value="0"></div>
-      <div><label>Head size <span class="small">0.6 &rarr; 1.6</span></label><input type="range" id="head" min="0.6" max="1.6" step="0.02" value="1"></div>
-      <div><label>Limb length <span class="small">0.8 &rarr; 1.25</span></label><input type="range" id="limbs" min="0.8" max="1.25" step="0.01" value="1"></div>
-      <div><label>Stride <span class="small">how big the walk is</span></label><input type="range" id="stride" min="0.8" max="2.2" step="0.05" value="1.2"></div>
-      <div><label>Body frame <span class="small">where the mass sits</span></label><select id="frame">
-        <option value="normal">ordinary</option>
-        <option value="gaunt">gaunt - all bone and hang</option>
-        <option value="wiry">wiry - lean and stringy</option>
-        <option value="burly">burly - thick through the chest</option>
-        <option value="bloated">bloated - heavy, sagging middle</option>
-        <option value="hulking">hulking - too much of everything</option>
-      </select></div>
-      <div><label>Shoulder width <span class="small">0.7 &rarr; 1.5</span></label><input type="range" id="shoulders" min="0.7" max="1.5" step="0.02" value="1"></div>
-      <div><label>Neck length <span class="small">0.5 &rarr; 2</span></label><input type="range" id="neck" min="0.5" max="2" step="0.02" value="1"></div>
-      <div><label>Head shape</label><select id="headshape">
-        <option value="normal">ordinary</option>
-        <option value="long">long and narrow</option>
-        <option value="wide">wide and flat-faced</option>
-        <option value="square">square, boxy jaw</option>
-        <option value="flat">low, flattened skull</option>
-      </select></div>
-    </div>
-    <div class="row" style="margin-top:4px">
-      <label class="chk" style="flex:1 1 130px"><input type="checkbox" id="clothes" checked><span>wears clothes</span></label>
-      <label class="chk" style="flex:1 1 130px"><input type="checkbox" id="claws"><span>claws</span></label>
-      <div style="flex:1 1 130px"><label>Horns <span class="small">0 to 4</span></label><input type="number" id="horns" min="0" max="4" value="0"></div>
-      <div style="flex:1 1 130px"><label>Extra eyes <span class="small">0 to 6</span></label><input type="number" id="eyes" min="0" max="6" value="0"></div>
-    </div>
-  </section>
+  <div id="work">
+    <div id="toolbox"></div>
 
-  <section>
-    <h2>2 &middot; Face and mouth</h2>
-    <p class="hint">The head in detail. Every control here is real geometry - the eyes, the brow, the jaw and the teeth
-      are built into the file it writes, not just described in the notes.</p>
-    <div class="grid2">
-      <div><label>Eye shape</label><select id="eyeshape">
-        <option value="round">round</option>
-        <option value="slit">narrow slit</option>
-        <option value="wide">wide and staring</option>
-        <option value="sunken">sunken, deep-set</option>
-        <option value="bulbous">big and bulging</option>
-        <option value="almond">tilted almond</option>
-      </select></div>
-      <div><label>Eye spacing <span class="small">0.4 close &rarr; 2.2 far apart</span></label><input type="range" id="eyegap" min="0.4" max="2.2" step="0.02" value="1"></div>
-      <div><label>Eye size <span class="small">0.6 &rarr; 2</span></label><input type="range" id="eyesize" min="0.6" max="2" step="0.02" value="1"></div>
-      <div><label>Eye tilt <span class="small">outer corner down or up</span></label><input type="range" id="eyetilt" min="-0.6" max="0.6" step="0.02" value="0"></div>
-      <div><label>Brow ridge <span class="small">0 to 1</span></label><input type="range" id="brow" min="0" max="1" step="0.05" value="0"></div>
-      <div><label>Mouth width <span class="small">0.6 &rarr; 1.6</span></label><input type="range" id="mouthw" min="0.6" max="1.6" step="0.02" value="1"></div>
-      <div><label>Jaw / muzzle</label><select id="jaw">
-        <option value="none">no jaw to speak of</option>
-        <option value="slight">a slight jaw</option>
-        <option value="long">a long pushed-out muzzle</option>
-        <option value="heavy">a heavy underslung jaw</option>
-        <option value="underbite">an underbite</option>
-      </select></div>
-      <div><label>Teeth</label><select id="teeth">
-        <option value="none">none</option>
-        <option value="small">small even teeth</option>
-        <option value="fangs">four long fangs</option>
-        <option value="needle">a row of needles</option>
-        <option value="flat">flat grinding teeth</option>
-        <option value="crooked">crooked and uneven</option>
-      </select></div>
-      <div><label>Tooth size <span class="small">0.5 &rarr; 1.8</span></label><input type="range" id="toothsize" min="0.5" max="1.8" step="0.02" value="1"></div>
+    <div id="left">
+      <div class="panelhead" data-fold="outliner">Outliner</div>
+      <div class="panelbody" id="outliner"></div>
+      <div class="panelhead" data-fold="presetbox">Start from a preset</div>
+      <div class="panelbody" id="presetbox">
+        <div id="presets"></div>
+        <p class="note" style="padding:0 10px">A preset fills in the whole creature. Change anything after &mdash; the viewport and the file follow.</p>
+      </div>
     </div>
-  </section>
 
-  <section>
-    <h2>3 &middot; Skin and clothes</h2>
-    <div class="grid2">
-      <div><label>Skin colour</label><input type="color" id="skinbase" value="#c9a68a"></div>
-      <div><label>Skin shadow (the low spots)</label><input type="color" id="skindark" value="#6a4a3a"></div>
-      <div><label>Skin highlight (the high spots)</label><input type="color" id="skinlight" value="#f0d8c8"></div>
-      <div><label>Veins <span class="small">0 to 1</span></label><input type="range" id="veins" min="0" max="1" step="0.05" value="0.15"></div>
-      <div><label>Mottling <span class="small">blotches, 0 to 1</span></label><input type="range" id="mottle" min="0" max="1" step="0.05" value="0.3"></div>
-      <div><label>Wetness <span class="small">0 dry &rarr; 1 glossy</span></label><input type="range" id="rough" min="0" max="1" step="0.05" value="0.6"></div>
-      <div><label>Top colour</label><input type="color" id="top" value="#4a5a78"></div>
-      <div><label>Bottom colour</label><input type="color" id="bottom" value="#23252b"></div>
-      <div><label>Shoes / feet colour</label><input type="color" id="shoes" value="#1a1714"></div>
-      <div><label>Stains and wear <span class="small">0 to 1</span></label><input type="range" id="stains" min="0" max="1" step="0.05" value="0.3"></div>
-      <div><label>Eye colour</label><input type="color" id="eyecolor" value="#1b130d"></div>
-      <div><label>Eye glow colour</label><input type="color" id="eyeglow" value="#ff6a3a"></div>
+    <div id="viewwrap">
+      <canvas id="c" tabindex="0"></canvas>
+      <div id="vhead">
+        <div class="vgroup" id="vshade"></div>
+        <div class="vgroup" id="vover"></div>
+        <div class="vgroup" id="vcam"></div>
+        <div class="vgroup" id="vlook"></div>
+      </div>
+      <canvas id="gizmo" width="192" height="192"></canvas>
+      <div id="vfoot"><span id="vinfo">-</span><span id="readout">-</span></div>
+      <div id="vtoast"></div>
+      <div id="novgl"></div>
     </div>
-    <label class="chk"><input type="checkbox" id="gloweyes"><span>the eyes give off light (it can be seen in the dark)</span></label>
-  </section>
 
-  <section>
-    <h2>4 &middot; Paint it <span class="small">the 3D brush</span></h2>
-    <label class="chk"><input type="checkbox" id="paintmode"><span>paint on the model - drag over the creature to lay down colour (hold the <b>right</b> mouse button to orbit while you paint)</span></label>
-    <div class="grid2">
-      <div><label>Brush colour</label><input type="color" id="brushcolor" value="#8a1f2a"></div>
-      <div><label>Brush size <span class="small">share of the skin</span></label><input type="range" id="brushsize" min="0.005" max="0.25" step="0.005" value="0.04"></div>
-      <div><label>Edge <span class="small">hard &rarr; airbrush</span></label><input type="range" id="brushsoft" min="0" max="0.9" step="0.05" value="0.6"></div>
-      <div><label>How strong <span class="small">one dab, 0.05 &rarr; 1</span></label><input type="range" id="brushalpha" min="0.05" max="1" step="0.05" value="0.85"></div>
-      <div><label>Paint onto</label><select id="brushtarget">
-        <option value="auto" selected>whatever the brush touches</option>
-        <option value="skin">the skin, always</option>
-        <option value="top">the top / shirt</option>
-        <option value="bottom">the bottom / trousers</option>
-      </select></div>
+    <div id="props">
+      <div id="tabs"></div>
+      <div id="tabbody"></div>
     </div>
-    <div class="row" style="margin-top:8px">
-      <button type="button" id="paintundo" style="flex:0 0 auto">Undo a stroke</button>
-      <button type="button" id="paintclear" style="flex:0 0 auto">Clear the paint</button>
-      <span class="badge" id="paintinfo">no paint yet</span>
-    </div>
-    <p class="hint">The dabs are written into the creature's own skin / cloth texture, so they cost nothing while the game
-      runs and they ship inside the file - the brush lines below are part of it. A texture is shared by every limb that
-      wears it, so a mark on one arm shows on the other arm too, exactly as it does in the game. Set the pose to
-      <b>standing still</b> while you paint.</p>
-  </section>
+  </div>
 
-  <section>
-    <h2>5 &middot; What it does</h2>
-    <div class="grid2">
-      <div><label>Name in the field guide</label><input type="text" id="name" value="Thing In The Hall"></div>
-      <div><label>Entity id <span class="small">short and unique: hall-thing</span></label><input type="text" id="id" value="hall-thing"></div>
-      <div><label>Field-guide number</label><input type="text" id="num" value="Entity 88"></div>
-      <div><label>Class</label><select id="cls"></select></div>
-      <div><label>Size line</label><input type="text" id="size" value="1.8 m"></div>
-      <div><label>Walk speed (m/s)</label><input type="number" id="speed" step="0.1" min="0" value="1"></div>
-      <div><label>Chase speed <span class="small">0 = never chases</span></label><input type="number" id="chase" step="0.1" min="0" value="3.6"></div>
-      <div><label>Sees you at (m)</label><input type="number" id="detect" step="0.5" min="0" value="7"></div>
-      <div><label>Damage per hit</label><input type="number" id="dmg" step="1" min="0" value="15"></div>
-      <div><label>Reach (m)</label><input type="number" id="reach" step="0.05" min="0" value="1.3"></div>
-      <div><label>Seconds between hits</label><input type="number" id="cd" step="0.1" min="0.1" value="1"></div>
-      <div><label>Remembers you for (s)</label><input type="number" id="memory" step="1" min="0" value="3"></div>
-    </div>
-    <label>Field-guide description</label><textarea id="desc">Something new in the halls. It has not decided about you yet.</textarea>
-    <label>Field-guide notes</label><textarea id="notes">Written in the entity studio.</textarea>
-    <label>Tips <span class="small">(one per line)</span></label><textarea id="tips">Keep your distance.
-It gives up quickly.</textarea>
-    <h3>Behaviour flags <span class="small">tick everything that applies</span></h3>
-    <div class="row" id="flags"></div>
-  </section>
+  <div id="timeline">
+    <div class="seg" id="poseseg"></div>
+    <input type="hidden" id="pose" value="walk">
+    <div class="seg"><button type="button" id="playbtn" title="Play / pause the animation (Space)">&#10074;&#10074; Pause</button></div>
+    <div id="speedwrap"></div>
+    <span class="spacer"></span>
+    <span class="badge" id="seedbadge">seed 1</span>
+    <button type="button" class="btn" id="reseed" title="Same species, a different individual (R)">New random bits</button>
+    <button type="button" class="btn" id="rebuild" title="Rebuild the model from the controls">Rebuild</button>
+  </div>
+  <div id="statusbar"><span id="tip">Ready.</span><span id="stpaint"></span><span id="sthist"></span></div>
 </div>
-
-<aside>
-  <div>
-    <h2>Preview</h2>
-    <canvas id="c"></canvas>
-    <div class="row" style="margin-top:8px">
-      <div><label>It is</label><select id="pose">
-        <option value="idle">standing still</option>
-        <option value="walk" selected>walking</option>
-        <option value="chase">chasing you</option>
-      </select></div>
-      <button type="button" id="reseed" style="flex:0 0 auto">New random bits</button>
-      <button type="button" id="rebuild" style="flex:0 0 auto">Rebuild</button>
-      <span class="badge" id="readout">-</span>
-    </div>
-    <p class="hint">Drag to orbit, scroll to zoom. Creatures are built out of randomness, so "new random bits" gives a
-      different individual of the same species.</p>
-  </div>
-
-  <div class="steps">
-    <h2>Put it in the game</h2>
-    <ol>
-      <li>Press <b>Download .js</b> (or <b>Copy the file</b>) and save it as <code id="path1">entities/hall-thing.js</code></li>
-      <li>Open <code>entities/loader.js</code> and add this line to the list, before <code>'core/phobia-finish.js'</code>, so the game loads the file at all:
-        <pre id="line1">    'hall-thing.js',</pre></li>
-      <li>Add the id to the creature pick list - the <code>"entities"</code> array inside the <code>GAME</code> block, kept in alphabetical order -
-        in <code>other/level-studio.html</code> and <code>other/entity-studio.html</code>, so a level can spawn it:
-        <pre id="idline">    "hall-thing",</pre></li>
-      <li>Reload the game. The entity viewer and the field guide pick the creature up by themselves once the file loads;
-        the wiring check below says whether a step is still missing.</li>
-    </ol>
-    <div class="row" style="margin-top:8px">
-      <div style="flex:1 1 220px"><label>File name <span class="small">saved inside entities/</span></label><input type="text" id="filename" value="hall-thing"></div>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button type="button" id="dl">Download .js</button>
-      <button type="button" id="copy">Copy the file</button>
-      <button type="button" id="copyline">Copy the loader line</button>
-      <button type="button" id="copyid">Copy the id line</button>
-    </div>
-    <div id="problems"></div>
-    <div id="wire"></div>
-  </div>
-
-  <div>
-    <h2>The file it will write</h2>
-    <p class="hint">This is plain text. Anything here can be edited by hand later - the numbers are the same ones the
-      sliders set.</p>
-    <pre id="file">-</pre>
-  </div>
-</aside>
-</main>
+<div id="modal"><div class="card" id="modalcard"></div></div>
+<input type="file" id="openfile" accept=".js,text/javascript" style="display:none">
 
 <script>window.__mod = {};</script>
 <script src="../lib/three.js"></script>
@@ -262,12 +250,19 @@ It gives up quickly.</textarea>
 <script>
 // ============================================================================
 // ENTITY STUDIO - writes one entities/<id>.js file (a model builder plus the
-// creature's stats) out of the controls above, and shows the result live.
+// creature's stats) out of the controls, and shows the result live in a
+// Blender / Paint 3D style workspace:
+//
+//   menu bar + tool options    toolbox (orbit, brush, spray, eraser, picker, fill)
+//   outliner + presets         viewport (gizmo, shading, overlays, brush cursor)
+//   properties tabs            timeline (pose, play, seed)
 //
 // The generated file uses the same shared parts as every creature in the game
 // (entities/core/rig.js and models-kit.js), so it walks, hunts or ignores you
-// exactly like the built-in ones do.
+// exactly like the built-in ones do. The file also carries the studio's own
+// state in a trailing comment, so "File > Open .js" can pick up where you left off.
 // ============================================================================
+
 const GAME = {"entities":["absence","arbiter","beast","bleeder","bloom","chase","clump","coil","colossus","counter","crawler","deathmoth","deephand","demon","dread","duller","examiner","faceling","flawless","formless","frostbitten","glitch","glutton","goodboy","gremlin","haze","hive","horizon","hound","hourman","howler","jester","librarian","lure","mannequin","mourner","murder","mut_chorus","mut_drowned","mut_fractured","mut_splice","mut_sprawl","mut_thicket","ninelives","onlooker","overgrowth","palestag","partygoer","peripheral","pg_attendant","pg_bouncer","pg_lifeguard","pg_mascot","pg_ringmaster","phantom","phlebotomist","porcelain","puppet","reflection","revenant","rootwalker","sandman","shade","shadow","showman","skinstealer","smiler","someone","squeeze","stature","stormcaller","stranger","supervisor","thorn","troglosidae","umbra","updraft","weaver","whisperer","window","worm","wretch"],"classes":["Apex Hostile","Hostile","Hostile / Ethereal","Hostile at night","Hostile in numbers","Lethal","Lethal (indirectly)","Lethal / Apex","Passive"],"stats":{"smiler":{"name":"Smiler","cls":"Hostile","speed":0.8,"chase":2,"dmg":34,"detect":6.5},"partygoer":{"name":"Partygoer","cls":"Hostile","speed":1.1,"chase":3.3,"dmg":22,"detect":13},"howler":{"name":"Howler","cls":"Hostile","speed":1.3,"chase":4.8,"dmg":30,"detect":8},"skinstealer":{"name":"Skin Stealer","cls":"Hostile","speed":1.1,"chase":2.9,"dmg":30,"detect":12},"chase":{"name":"The Chase","cls":"Lethal","speed":0,"chase":4.2,"dmg":45,"detect":999},"hound":{"name":"Hound","cls":"Hostile","speed":1.3,"chase":4.3,"dmg":18,"detect":6.5},"faceling":{"name":"Faceling","cls":"Passive","speed":1,"chase":0,"dmg":0,"detect":0},"wretch":{"name":"Wretch","cls":"Hostile","speed":1,"chase":3.4,"dmg":20,"detect":10},"clump":{"name":"Clump","cls":"Hostile","speed":0.6,"chase":1.8,"dmg":40,"detect":16},"deathmoth":{"name":"Deathmoth","cls":"Hostile","speed":1.6,"chase":3.7,"dmg":25,"detect":11},"mannequin":{"name":"Mannequin","cls":"Hostile","speed":0,"chase":5.8,"dmg":30,"detect":24},"haze":{"name":"The Haze","cls":"Hostile","speed":0.5,"chase":0.95,"dmg":6,"detect":16},"worm":{"name":"The Worm","cls":"Lethal","speed":1.7,"chase":4.6,"dmg":45,"detect":16},"whisperer":{"name":"Whisperer","cls":"Hostile","speed":1,"chase":2.6,"dmg":30,"detect":30},"stature":{"name":"The Stature","cls":"Lethal","speed":0.9,"chase":3.5,"dmg":45,"detect":28},"crawler":{"name":"Crawler","cls":"Hostile","speed":1.4,"chase":6.4,"dmg":24,"detect":14},"duller":{"name":"Duller","cls":"Hostile","speed":1,"chase":3.3,"dmg":32,"detect":11},"troglosidae":{"name":"Troglosidae","cls":"Hostile","speed":0.8,"chase":5,"dmg":26,"detect":9},"window":{"name":"Window","cls":"Hostile","speed":0,"chase":0,"dmg":22,"detect":2.4},"beast":{"name":"The Beast of Level 5","cls":"Hostile","speed":0.9,"chase":3.1,"dmg":38,"detect":13},"peripheral":{"name":"Peripheral","cls":"Passive","speed":0.6,"chase":0,"dmg":0,"detect":0},"puppet":{"name":"Stop-Motion Puppet","cls":"Hostile at night","speed":0.7,"chase":3.3,"dmg":24,"detect":14},"weaver":{"name":"The Weaver","cls":"Hostile","speed":1,"chase":4.6,"dmg":26,"detect":9},"coil":{"name":"The Coil","cls":"Lethal","speed":1.2,"chase":3.4,"dmg":34,"detect":11},"goodboy":{"name":"The Good Boy","cls":"Apex Hostile","speed":1.8,"chase":6.2,"dmg":42,"detect":18},"murder":{"name":"The Murder","cls":"Hostile","speed":2.4,"chase":4.2,"dmg":9,"detect":26},"ninelives":{"name":"Nine Lives","cls":"Lethal / Apex","speed":1.6,"chase":3.8,"dmg":55,"detect":24},"revenant":{"name":"The Revenant","cls":"Hostile / Ethereal","speed":0.7,"chase":2.4,"dmg":38,"detect":35},"porcelain":{"name":"Porcelain","cls":"Hostile","speed":0,"chase":5.2,"dmg":20,"detect":40},"showman":{"name":"The Showman","cls":"Hostile","speed":1.2,"chase":3.8,"dmg":32,"detect":20},"jester":{"name":"Giggles","cls":"Lethal","speed":1.6,"chase":5.4,"dmg":28,"detect":16},"mourner":{"name":"The Restless Dead","cls":"Hostile","speed":1.1,"chase":3.6,"dmg":22,"detect":8},"phlebotomist":{"name":"The Phlebotomist","cls":"Hostile","speed":1.1,"chase":3.7,"dmg":16,"detect":12},"lure":{"name":"The Lure","cls":"Lethal","speed":0.7,"chase":1.6,"dmg":42,"detect":30},"palestag":{"name":"The Pale Stag","cls":"Lethal","speed":1.3,"chase":5.8,"dmg":36,"detect":40},"updraft":{"name":"The Updraft","cls":"Lethal (indirectly)","speed":1.6,"chase":2.8,"dmg":0,"detect":30},"colossus":{"name":"The Colossus","cls":"Lethal","speed":3,"chase":3,"dmg":55,"detect":999},"squeeze":{"name":"The Squeeze","cls":"Hostile","speed":1,"chase":5.6,"dmg":26,"detect":10},"horizon":{"name":"The Horizon Man","cls":"Lethal","speed":2.4,"chase":2.4,"dmg":60,"detect":999},"absence":{"name":"The Absence","cls":"Hostile","speed":0.8,"chase":1.25,"dmg":24,"detect":999},"deephand":{"name":"The Deep Hand","cls":"Lethal (indirectly)","speed":0,"chase":0,"dmg":18,"detect":6},"onlooker":{"name":"The Onlooker","cls":"Hostile","speed":0,"chase":4.6,"dmg":34,"detect":999},"someone":{"name":"Someone","cls":"Lethal","speed":1.2,"chase":5.2,"dmg":38,"detect":14},"hive":{"name":"The Hive","cls":"Hostile","speed":1,"chase":3.3,"dmg":18,"detect":12},"umbra":{"name":"The Umbra","cls":"Lethal","speed":1,"chase":4.6,"dmg":30,"detect":14},"reflection":{"name":"Your Reflection","cls":"Hostile","speed":0,"chase":0,"dmg":30,"detect":999},"examiner":{"name":"The Examiner","cls":"Hostile","speed":0.9,"chase":2.8,"dmg":30,"detect":9},"flawless":{"name":"The Flawless","cls":"Hostile","speed":0.8,"chase":3.9,"dmg":26,"detect":999},"arbiter":{"name":"The Arbiter","cls":"Lethal","speed":1,"chase":4.4,"dmg":34,"detect":999},"sandman":{"name":"The Sandman","cls":"Lethal","speed":0,"chase":3.2,"dmg":40,"detect":999},"thorn":{"name":"The Thornbound","cls":"Hostile","speed":1.1,"chase":3.4,"dmg":22,"detect":11},"formless":{"name":"The Formless","cls":"Lethal","speed":1.2,"chase":4,"dmg":30,"detect":16},"dread":{"name":"The Dread","cls":"Lethal","speed":1,"chase":3,"dmg":30,"detect":18},"phantom":{"name":"Phantom","cls":"Passive","speed":0.5,"chase":0,"dmg":0,"detect":0},"stranger":{"name":"The Strangers","cls":"Hostile in numbers","speed":0,"chase":1.7,"dmg":0,"detect":999},"hourman":{"name":"The Hour Man","cls":"Lethal","speed":1,"chase":1.6,"dmg":45,"detect":999},"counter":{"name":"The Counter","cls":"Lethal","speed":0,"chase":5,"dmg":36,"detect":999},"glitch":{"name":"Corrupted","cls":"Hostile","speed":0,"chase":0,"dmg":28,"detect":999},"stormcaller":{"name":"The Stormcaller","cls":"Lethal","speed":2,"chase":4.2,"dmg":40,"detect":999},"frostbitten":{"name":"The Frostbitten","cls":"Hostile","speed":0.7,"chase":1.6,"dmg":26,"detect":10},"bleeder":{"name":"The Bleeder","cls":"Hostile","speed":1,"chase":3.5,"dmg":22,"detect":12},"bloom":{"name":"The Bloom","cls":"Hostile","speed":0,"chase":3.8,"dmg":28,"detect":999},"librarian":{"name":"The Librarian","cls":"Lethal","speed":0.8,"chase":4.4,"dmg":34,"detect":0},"overgrowth":{"name":"The Overgrowth","cls":"Hostile","speed":0.9,"chase":2.4,"dmg":20,"detect":14},"glutton":{"name":"The Glutton","cls":"Hostile","speed":0.9,"chase":3.4,"dmg":24,"detect":9},"rootwalker":{"name":"The Rootwalker","cls":"Lethal","speed":0,"chase":1.8,"dmg":38,"detect":999},"supervisor":{"name":"The Supervisor","cls":"Hostile","speed":1,"chase":3.9,"dmg":30,"detect":0},"mut_chorus":{"name":"The Chorus","cls":"Hostile","speed":0.9,"chase":2.3,"dmg":40,"detect":8},"mut_splice":{"name":"The Splice","cls":"Hostile","speed":1.1,"chase":3,"dmg":34,"detect":12},"mut_thicket":{"name":"The Thicket","cls":"Lethal","speed":0.9,"chase":3.6,"dmg":45,"detect":28},"mut_sprawl":{"name":"The Sprawl","cls":"Lethal","speed":1.4,"chase":6.2,"dmg":26,"detect":14},"mut_fractured":{"name":"The Fractured","cls":"Hostile","speed":0,"chase":5.6,"dmg":32,"detect":24},"mut_drowned":{"name":"The Drowned Howler","cls":"Hostile","speed":1.3,"chase":4.6,"dmg":32,"detect":9},"pg_lifeguard":{"name":"The Lifeguard","cls":"Hostile","speed":1.1,"chase":3.1,"dmg":30,"detect":13},"pg_mascot":{"name":"The Mascot","cls":"Lethal","speed":0.9,"chase":3.5,"dmg":45,"detect":28},"pg_attendant":{"name":"The Attendant","cls":"Hostile","speed":0,"chase":5.6,"dmg":30,"detect":24},"pg_bouncer":{"name":"The Bouncer","cls":"Lethal","speed":1.4,"chase":6.3,"dmg":25,"detect":14},"pg_ringmaster":{"name":"The Ringmaster","cls":"Hostile","speed":1.3,"chase":4.7,"dmg":30,"detect":9}}};
 
 // ------------------------------------------------------------------ shorthand
@@ -445,354 +440,6 @@ const PRESETS = [
     flags: ['howl'],
   },
 ];
-
-// ------------------------------------------------------------------ preview
-let renderer = null, scene = null, camera = null, hemi = null, key = null, rim = null;
-let current = null, seed = 1, camRig = null;
-const cam = { target: new THREE.Vector3(0, 0.9, 0), yaw: 0.7, pitch: 0.22, dist: 4.5, want: 4.5 };
-
-function initPreview() {
-  const canvas = $('c');
-  try {
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  } catch (e) {
-    const p = document.createElement('p');
-    p.className = 'warn';
-    p.textContent = 'No 3D preview in this browser (' + (e && e.message) + '). The file below is still good.';
-    if (canvas.parentElement) canvas.parentElement.insertBefore(p, canvas); else (canvas.parentNode || document.body).appendChild(p);
-    renderer = null;
-    return;
-  }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  installGlobalPatches();
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x191712);
-  scene.fog = new THREE.Fog(0x191712, 16, 42);
-  camera = new THREE.PerspectiveCamera(42, 1, 0.05, 400);
-  camRig = new THREE.Group();
-  scene.add(camRig);
-  hemi = new THREE.HemisphereLight(0xdfe6ff, 0x3a3228, 0.9);
-  key = new THREE.DirectionalLight(0xfff0d8, 2.2);
-  key.position.set(4, 8, 5);
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  Object.assign(key.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 0.5, far: 40 });
-  key.shadow.bias = -0.0004;
-  rim = new THREE.DirectionalLight(0x8fa8ff, 0.8);
-  rim.position.set(-5, 3, -6);
-  scene.add(hemi, key, key.target, rim);
-  const floor = new THREE.Mesh(new THREE.CircleGeometry(400, 64).rotateX(-Math.PI / 2),
-    new THREE.MeshStandardMaterial({ color: 0x2a2824, roughness: 0.95 }));
-  floor.receiveShadow = true;
-  scene.add(floor);
-  const grid = new THREE.GridHelper(20, 40, 0xe9c46a, 0x6b6451);
-  grid.material.transparent = true; grid.material.opacity = 0.24; grid.position.y = 0.002;
-  scene.add(grid);
-
-  let dragging = false, lx = 0, ly = 0;
-  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-  canvas.addEventListener('pointerdown', (e) => {
-    // the left button paints while the brush is on; the right button always orbits
-    if ($('paintmode').checked && e.button !== 2 && startStroke(e)) {
-      canvas.setPointerCapture(e.pointerId);
-      e.preventDefault();
-      return;
-    }
-    dragging = true; lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId);
-  });
-  canvas.addEventListener('pointerup', () => {
-    // finish the stroke: the file is rewritten and the paint replayed from the stroke
-    // list, so what you see is exactly what gets saved
-    if (paintDown) { paintDown = false; stroke = null; update(false); }
-    dragging = false;
-  });
-  canvas.addEventListener('pointercancel', () => { paintDown = false; stroke = null; dragging = false; });
-  canvas.addEventListener('pointermove', (e) => {
-    if (paintDown) { continueStroke(e); return; }
-    if (!dragging) return;
-    cam.yaw -= (e.clientX - lx) * 0.0065;
-    cam.pitch = clampRange(cam.pitch + (e.clientY - ly) * 0.0065, -0.2, 1.5);
-    lx = e.clientX; ly = e.clientY;
-  });
-  canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    cam.want = clampRange(cam.want * Math.exp(e.deltaY * 0.0012), 0.8, 40);
-  }, { passive: false });
-}
-
-function disposeCurrent() {
-  if (!current) return;
-  scene.remove(current.holder);
-  current.model.root.traverse((o) => {
-    if (o.geometry) o.geometry.dispose();
-    if (o.material) for (const m of (Array.isArray(o.material) ? o.material : [o.material])) { if (m.map) m.map.dispose(); if (m.bumpMap) m.bumpMap.dispose(); }
-  });
-  current = null;
-}
-
-function frameCamera() {
-  const m = current.model;
-  const h = Math.max(m.height || 1.8, 0.5), r = Math.max(m.radius || 0.4, 0.2);
-  cam.want = clampRange(Math.max(h, r * 2.2) * 2.6 + 1.2, 1.4, 30);
-  cam.dist = cam.want;
-  cam.target.set(0, h * 0.5, 0);
-  const reach = Math.max(8, h * 1.8);
-  const sc = key.shadow.camera;
-  sc.left = -reach; sc.right = reach; sc.top = reach; sc.bottom = -reach; sc.far = reach * 5;
-  sc.updateProjectionMatrix();
-}
-
-// ------------------------------------------------------------------ the 3D brush
-// A mark is stored as a stroke (one per drag) and drawn straight into the texture
-// canvas so the preview answers immediately - but the strokes are also the source of
-// truth, because rebuild() throws every texture away (models-kit caches them by name
-// for the whole page). The emitted file replays the strokes, so the preview, the
-// entity viewer and the game all end up wearing exactly the same paint.
-let painting = [];   // [{ role: 'skin' | 'top' | 'bottom', dabs: [[u, v, r, colour, softness, strength], ...] }]
-let stroke = null;   // the drag in progress
-let paintDown = false;
-const PAINT_MAX = 2500;
-
-/** The id the emitter will use, so the brush can find that creature's textures. */
-function entityId() { return ($('id').value.trim() || 'my-entity').replace(/[^a-z0-9_-]/gi, '-').toLowerCase(); }
-/** The texture name each paintable material is built from, mirroring buildFile(). */
-function texNameFor(role) {
-  if (role === 'skin') return entityId() + '-skin';
-  if (role === 'top') return $('clothes').checked ? entityId() + '-clothing' : null;
-  if (role === 'bottom') return $('clothes').checked ? entityId() + '-trousers' : entityId() + '-hide';
-  return null;
-}
-function texFor(role) {
-  const name = texNameFor(role);
-  return name ? M['src/entities/models.js'].HELPERS.TEX[name] || null : null;
-}
-/** Every texture the page has cached; dropping them is what makes a colour change show up. */
-function clearTextures() {
-  const T = M['src/entities/models.js'].HELPERS.TEX;
-  for (const k of Object.keys(T)) delete T[k];
-}
-
-const pickRay = new THREE.Raycaster();
-function pickModel(e) {
-  if (!current) return null;
-  const canvas = $('c'), rect = canvas.getBoundingClientRect();
-  pickRay.setFromCamera(new THREE.Vector2(
-    ((e.clientX - rect.left) / rect.width) * 2 - 1,
-    -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
-  const hits = pickRay.intersectObject(current.model.root, true);
-  return hits.length && hits[0].uv ? hits[0] : null;
-}
-/** Which of skin / top / bottom did that mesh hit? Null when the part has no texture. */
-function roleOfMaterial(mat) {
-  const m = Array.isArray(mat) ? mat[0] : mat;
-  const img = m && m.map && m.map.image;
-  if (img) for (const role of ['skin', 'top', 'bottom']) { const t = texFor(role); if (t && t.canvas === img) return role; }
-  const forced = $('brushtarget').value;
-  return forced !== 'auto' && texFor(forced) ? forced : null;
-}
-
-function brush() {
-  return {
-    colour: /^#[0-9a-f]{6}$/i.test($('brushcolor').value) ? $('brushcolor').value : '#ffffff',
-    radius: clampRange(num('brushsize'), 0.005, 0.25),
-    soft: clampRange(num('brushsoft'), 0, 0.9),
-    alpha: clampRange(num('brushalpha'), 0.05, 1),
-  };
-}
-
-function paintDab(role, u, v, colour, radius, soft, alpha) {
-  const t = texFor(role);
-  if (!t) return;
-  const c = t.canvas, g = c.getContext('2d');
-  const hex = /^#(..)(..)(..)$/.exec(colour);
-  const rgb = hex ? [parseInt(hex[1], 16), parseInt(hex[2], 16), parseInt(hex[3], 16)] : [255, 255, 255];
-  const x = u * c.width, y = (1 - v) * c.height, rad = Math.max(1, radius * c.width);
-  const gr = g.createRadialGradient(x, y, Math.max(0, rad * (1 - soft)), x, y, rad);
-  gr.addColorStop(0, 'rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',' + alpha + ')');
-  gr.addColorStop(1, 'rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',0)');
-  g.fillStyle = gr;
-  g.beginPath(); g.arc(x, y, rad, 0, Math.PI * 2); g.fill();
-  t.map.needsUpdate = true;
-}
-
-function totalDabs() { return painting.reduce((a, s) => a + s.dabs.length, 0); }
-function pushDab(role, u, v) {
-  if (totalDabs() >= PAINT_MAX) { renderPaintInfo('that is as much paint as one creature can hold'); return; }
-  const b = brush();
-  if (!stroke) { stroke = { role, dabs: [] }; painting.push(stroke); }
-  const cu = +u.toFixed(4), cv = +v.toFixed(4);
-  stroke.dabs.push([cu, cv, b.radius, b.colour, b.soft, b.alpha]);
-  paintDab(role, cu, cv, b.colour, b.radius, b.soft, b.alpha);
-}
-
-function renderPaintInfo(note) {
-  const n = totalDabs();
-  const roles = [...new Set(painting.map((s) => s.role))];
-  $('paintinfo').textContent = note || (n ? n + ' mark' + (n === 1 ? '' : 's') + ' on the ' + roles.join(' / ') : 'no paint yet');
-}
-
-function startStroke(e) {
-  const hit = pickModel(e);
-  if (!hit) { renderPaintInfo('nothing under the brush'); return false; }
-  const role = roleOfMaterial(hit.object.material);
-  if (!role) { renderPaintInfo('that part has no texture - eyes, teeth and shoes are flat colours. Aim at the skin or the clothes'); return false; }
-  stroke = null;
-  paintDown = true;
-  pushDab(role, hit.uv.x, hit.uv.y);
-  renderPaintInfo();
-  return true;
-}
-function continueStroke(e) {
-  const hit = pickModel(e);
-  if (!hit || !stroke) return;
-  const last = stroke.dabs[stroke.dabs.length - 1];
-  const u = hit.uv.x, v = hit.uv.y, b = brush();
-  // the pointer jumps between frames: stamp along the way so the line comes out solid
-  const steps = Math.min(40, Math.ceil(Math.hypot(u - last[0], v - last[1]) / Math.max(0.004, b.radius * 0.5)));
-  for (let i = 1; i < steps; i++) {
-    const t = i / steps;
-    pushDab(stroke.role, last[0] + (u - last[0]) * t, last[1] + (v - last[1]) * t);
-  }
-  pushDab(stroke.role, u, v);
-  renderPaintInfo();
-}
-
-/** Build the file text, run it (it registers itself), and put the model on screen. */
-function rebuild(reseed) {
-  if (!renderer) return;
-  const built = buildFile();
-  let ok = true;
-  try {
-    new Function(built.text)();
-  } catch (e) {
-    ok = false;
-    $('problems').innerHTML = '<p class="warn">The generated file threw an error: ' + String(e && e.message) + '</p>';
-  }
-  if (!ok || !M['src/entities/registry.js'].BUILDERS[built.id]) return;
-  disposeCurrent();
-  // Textures are cached by name for the whole page, so drop them: without this a
-  // skin-colour change would never show up, and the brush strokes the file replays
-  // would be laid on top of the ones already in the canvas.
-  clearTextures();
-  if (reseed) seed += 1;
-  let model;
-  try {
-    model = M['src/entities/models.js'].buildModel(built.id, new RNG(seed * 7919 + 13));
-  } catch (e) {
-    $('problems').innerHTML = '<p class="warn">The model could not be built: ' + String(e && e.message) + '</p>';
-    return;
-  }
-  model.root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; o.frustumCulled = false; } });
-  const holder = new THREE.Group();
-  holder.add(model.root);
-  scene.add(holder);
-  current = {
-    id: built.id, model, holder,
-    st: { speed: 0, phase: Math.random() * 6, t: Math.random() * 10, look: 0, attack: 0, chasing: false,
-      crawl: false, ceiling: 3.2, prox: 0, stride: num('stride'), pitch: $('kind').value === 'quad' ? 1.18 : 0 },
-  };
-  for (let i = 0; i < 8; i++) { try { model.animate(current.st, 0.016); } catch (e) { break; } }
-  setLight(model.mats, 0.34, 0.34, 0.34);
-  frameCamera();
-}
-
-function placeCamera() {
-  const cp = Math.cos(cam.pitch);
-  camera.position.set(
-    Math.sin(cam.yaw) * cp * cam.dist,
-    Math.max(0.15, Math.sin(cam.pitch) * cam.dist + 0.4),
-    Math.cos(cam.yaw) * cp * cam.dist);
-  camera.lookAt(cam.target);
-}
-
-let last = performance.now(), fpsT = 0, frames = 0;
-function loop(now) {
-  requestAnimationFrame(loop);
-  if (!renderer) return;
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  const canvas = $('c');
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  if (canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio())) {
-    renderer.setSize(w, h, false);
-    camera.aspect = w / Math.max(1, h);
-    camera.updateProjectionMatrix();
-  }
-  GLOBAL_UNIFORMS.uTime.value += dt;
-  if (current) {
-    const pose = $('pose').value;
-    const walk = Math.max(num('speed'), 0.6), run = Math.max(num('chase'), walk * 1.6);
-    const target = pose === 'idle' ? 0 : pose === 'chase' ? run : walk;
-    current.st.speed += (target - current.st.speed) * Math.min(1, dt * 4);
-    current.st.chasing = pose === 'chase';
-    current.st.stride = num('stride');
-    try {
-      current.model.animate(current.st, dt);
-    } catch (e) {
-      current = null;
-      $('problems').innerHTML = '<p class="warn">The animation threw an error: ' + String(e && e.message) + '</p>';
-      return;
-    }
-  }
-  cam.dist += (cam.want - cam.dist) * Math.min(1, dt * 8);
-  placeCamera();
-  key.target.position.copy(cam.target);
-  key.target.updateMatrixWorld();
-  renderer.render(scene, camera);
-  frames++; fpsT += dt;
-  if (fpsT > 0.5) {
-    $('readout').textContent = (frames / fpsT).toFixed(0) + ' fps' + (current ? ' \u00b7 ' + current.st.speed.toFixed(2) + ' m/s' : '');
-    fpsT = 0; frames = 0;
-  }
-}
-
-// ------------------------------------------------------------------ the flag and class lists
-const flagBox = $('flags');
-for (const [id, help] of FLAGS) {
-  const l = document.createElement('label');
-  l.className = 'chk';
-  l.style.flex = '1 1 165px';
-  l.innerHTML = '<input type="checkbox" id="flag_' + id + '"><span>' + id + ' <span class="small">' + help + '</span></span>';
-  flagBox.appendChild(l);
-}
-for (const c of CLASSES) { const o = document.createElement('option'); o.value = c; o.textContent = c; $('cls').appendChild(o); }
-$('cls').value = CLASSES.includes('Hostile') ? 'Hostile' : CLASSES[0];
-
-const presetBox = $('presets');
-PRESETS.forEach((p) => {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.textContent = p.name;
-  b.addEventListener('click', () => applyPreset(p));
-  presetBox.appendChild(b);
-});
-function applyPreset(p) {
-  const map = { name2: 'name' };
-  // the detail controls are per-creature too: reset them first so a preset that
-  // says nothing about the face gets a neutral one instead of the last one's teeth.
-  for (const k of Object.keys(DETAIL_DEFAULTS)) {
-    const el = $(k);
-    if (!el) continue;
-    if (el.type === 'checkbox') el.checked = !!DETAIL_DEFAULTS[k]; else el.value = DETAIL_DEFAULTS[k];
-  }
-  for (const k of Object.keys(p)) {
-    if (k === 'flags' || k === 'name') continue;
-    const el = $(map[k] || k);
-    if (!el) continue;
-    if (el.type === 'checkbox') el.checked = !!p[k];
-    else el.value = p[k];
-  }
-  for (const [id] of FLAGS) $('flag_' + id).checked = (p.flags || []).includes(id);
-  $('filename').value = p.id;
-  $('filename').dataset.touched = '1';
-  // a preset is a different creature wearing different textures, so its paint goes too
-  painting = [];
-  stroke = null;
-  renderPaintInfo();
-  update(false, true);
-}
 
 // ------------------------------------------------------------------ build the file
 function flagList() { return FLAGS.map(([id]) => id).filter((id) => $('flag_' + id).checked); }
@@ -1035,6 +682,8 @@ function buildFile() {
     '})();',
     '',
   ]);
+  // the studio's own state rides along as a final comment so File > Open .js can restore it
+  out.push('/* studio-state ' + stateJSON().replace(/\*\//g, '*\\/') + ' */', '');
 
   return { text: out.join('\n'), id, name, fname };
 }
@@ -1058,8 +707,1425 @@ function problems(built) {
   return out;
 }
 
+// ============================================================================
+// ===================  THE WORKSPACE  (everything below is UI)  ==============
+// ============================================================================
+
+// ------------------------------------------------------------------ icons
+const svg = (body) => '<svg viewBox="0 0 24 24">' + body + '</svg>';
+const ICON = {
+  select: svg('<path d="M5 3l14 7-6 2-2 6z"/>'),
+  brush: svg('<path d="M18 3l3 3-9 9-3-3z"/><path d="M9 12c-3 0-4 2-4 4 0 2-1 3-2 3 4 1 8 0 8-4"/>'),
+  spray: svg('<rect x="8" y="10" width="8" height="11" rx="2"/><path d="M10 10V7h4v3"/><circle cx="5" cy="6" r=".7"/><circle cx="3.5" cy="9" r=".7"/><circle cx="6.5" cy="9.5" r=".7"/><circle cx="4.5" cy="12" r=".7"/>'),
+  erase: svg('<path d="M3 16l9-10 8 8-5 6H8z"/><path d="M8 11l8 8"/>'),
+  pick: svg('<path d="M20 4a2.5 2.5 0 0 0-3.5 0L14 6.5 17.5 10 20 7.5a2.5 2.5 0 0 0 0-3.5z"/><path d="M14 7L5 16v3h3l9-9"/>'),
+  fill: svg('<path d="M5 11l7-7 7 7-7 7z"/><path d="M20 15c1 1.5 1.5 2.5 1.5 3.3a1.5 1.5 0 0 1-3 0c0-.8.5-1.8 1.5-3.3z"/>'),
+  body: svg('<circle cx="12" cy="5" r="2.5"/><path d="M12 8v7M7 11l5-3 5 3M9 21l3-6 3 6"/>'),
+  face: svg('<circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r="1"/><circle cx="15" cy="10" r="1"/><path d="M8.5 15c2 2 5 2 7 0"/>'),
+  surface: svg('<circle cx="12" cy="12" r="9"/><path d="M5 9c4 2 10 2 14 0M4 14c5 3 11 3 16 0"/>'),
+  paint: svg('<path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-1 1.5-2s0-2 1.5-2h2a3 3 0 0 0 3-3c0-5-4-11-8-11z"/><circle cx="8" cy="10" r="1"/><circle cx="12" cy="7" r="1"/><circle cx="16" cy="9" r="1"/>'),
+  behave: svg('<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>'),
+  export: svg('<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>'),
+};
+
+// ------------------------------------------------------------------ the property schema
+// Every control in the properties editor, with the ids the file builder reads.
+const OPT = (a) => a.map((x) => [x[0], x[1]]);
+const TABS = [
+  { id: 'body', icon: 'body', label: 'Body', sub: 'Skeleton and proportions', groups: [
+    { title: 'Proportions', f: [
+      { id: 'kind', t: 'select', label: 'Stands like', opts: [['biped', 'A person (two legs)'], ['quad', 'A beast on all fours']] },
+      { id: 'height', t: 'num', label: 'Height (m)', min: 0.6, max: 4, step: 0.05, value: 1.8 },
+      { id: 'build', t: 'range', label: 'Build', min: -1, max: 1, step: 0.05, value: 0, fmt: 'p2', tip: 'Slim to broad' },
+      { id: 'head', t: 'range', label: 'Head size', min: 0.6, max: 1.6, step: 0.02, value: 1, fmt: 'p2' },
+      { id: 'limbs', t: 'range', label: 'Limb length', min: 0.8, max: 1.25, step: 0.01, value: 1, fmt: 'p2' },
+      { id: 'shoulders', t: 'range', label: 'Shoulder width', min: 0.7, max: 1.5, step: 0.02, value: 1, fmt: 'p2' },
+      { id: 'neck', t: 'range', label: 'Neck length', min: 0.5, max: 2, step: 0.02, value: 1, fmt: 'p2' },
+      { id: 'stride', t: 'range', label: 'Stride', min: 0.8, max: 2.2, step: 0.05, value: 1.2, fmt: 'p2', tip: 'How big the walk is' },
+    ] },
+    { title: 'Shape', f: [
+      { id: 'frame', t: 'select', label: 'Body frame', opts: [['normal', 'Ordinary'], ['gaunt', 'Gaunt - all bone and hang'], ['wiry', 'Wiry - lean and stringy'], ['burly', 'Burly - thick through the chest'], ['bloated', 'Bloated - heavy, sagging middle'], ['hulking', 'Hulking - too much of everything']] },
+      { id: 'headshape', t: 'select', label: 'Head shape', opts: [['normal', 'Ordinary'], ['long', 'Long and narrow'], ['wide', 'Wide and flat-faced'], ['square', 'Square, boxy jaw'], ['flat', 'Low, flattened skull']] },
+    ] },
+    { title: 'Extras', f: [
+      { id: 'clothes', t: 'check', label: 'Wears clothes', value: true },
+      { id: 'claws', t: 'check', label: 'Claws' },
+      { id: 'horns', t: 'num', label: 'Horns (0-4)', min: 0, max: 4, step: 1, value: 0 },
+      { id: 'eyes', t: 'num', label: 'Extra eyes (0-6)', min: 0, max: 6, step: 1, value: 0 },
+    ] },
+  ] },
+  { id: 'face', icon: 'face', label: 'Face', sub: 'Every control here is real geometry in the file', groups: [
+    { title: 'Eyes', f: [
+      { id: 'eyeshape', t: 'select', label: 'Eye shape', opts: [['round', 'Round'], ['slit', 'Narrow slit'], ['wide', 'Wide and staring'], ['sunken', 'Sunken, deep-set'], ['bulbous', 'Big and bulging'], ['almond', 'Tilted almond']] },
+      { id: 'eyegap', t: 'range', label: 'Spacing', min: 0.4, max: 2.2, step: 0.02, value: 1, fmt: 'p2', tip: 'Close to far apart' },
+      { id: 'eyesize', t: 'range', label: 'Size', min: 0.6, max: 2, step: 0.02, value: 1, fmt: 'p2' },
+      { id: 'eyetilt', t: 'range', label: 'Tilt', min: -0.6, max: 0.6, step: 0.02, value: 0, fmt: 'p2', tip: 'Outer corner down or up' },
+      { id: 'brow', t: 'range', label: 'Brow ridge', min: 0, max: 1, step: 0.05, value: 0, fmt: 'p2' },
+    ] },
+    { title: 'Mouth', f: [
+      { id: 'mouthw', t: 'range', label: 'Mouth width', min: 0.6, max: 1.6, step: 0.02, value: 1, fmt: 'p2' },
+      { id: 'jaw', t: 'select', label: 'Jaw / muzzle', opts: [['none', 'No jaw to speak of'], ['slight', 'A slight jaw'], ['long', 'A long pushed-out muzzle'], ['heavy', 'A heavy underslung jaw'], ['underbite', 'An underbite']] },
+      { id: 'teeth', t: 'select', label: 'Teeth', opts: [['none', 'None'], ['small', 'Small even teeth'], ['fangs', 'Four long fangs'], ['needle', 'A row of needles'], ['flat', 'Flat grinding teeth'], ['crooked', 'Crooked and uneven']] },
+      { id: 'toothsize', t: 'range', label: 'Tooth size', min: 0.5, max: 1.8, step: 0.02, value: 1, fmt: 'p2' },
+    ] },
+  ] },
+  { id: 'surface', icon: 'surface', label: 'Material', sub: 'Colours and texture generators', groups: [
+    { title: 'Skin', f: [
+      { id: 'skinbase', t: 'color', label: 'Colour', value: '#c9a68a' },
+      { id: 'skindark', t: 'color', label: 'Shadow (low spots)', value: '#6a4a3a' },
+      { id: 'skinlight', t: 'color', label: 'Highlight (high spots)', value: '#f0d8c8' },
+      { id: 'veins', t: 'range', label: 'Veins', min: 0, max: 1, step: 0.05, value: 0.15, fmt: 'p2' },
+      { id: 'mottle', t: 'range', label: 'Mottling', min: 0, max: 1, step: 0.05, value: 0.3, fmt: 'p2' },
+      { id: 'rough', t: 'range', label: 'Wetness', min: 0, max: 1, step: 0.05, value: 0.6, fmt: 'p2', tip: '0 dry, 1 glossy' },
+    ] },
+    { title: 'Clothes', f: [
+      { id: 'top', t: 'color', label: 'Top', value: '#4a5a78' },
+      { id: 'bottom', t: 'color', label: 'Bottom', value: '#23252b' },
+      { id: 'shoes', t: 'color', label: 'Shoes / feet', value: '#1a1714' },
+      { id: 'stains', t: 'range', label: 'Stains and wear', min: 0, max: 1, step: 0.05, value: 0.3, fmt: 'p2' },
+    ] },
+    { title: 'Eyes', f: [
+      { id: 'eyecolor', t: 'color', label: 'Eye colour', value: '#1b130d' },
+      { id: 'eyeglow', t: 'color', label: 'Glow colour', value: '#ff6a3a' },
+      { id: 'gloweyes', t: 'check', label: 'The eyes give off light', tipx: 'visible in the dark' },
+    ] },
+  ] },
+  { id: 'behaviour', icon: 'behave', label: 'Behaviour', sub: 'What it does in the game and in the field guide', groups: [
+    { title: 'Identity', f: [
+      { id: 'name', t: 'text', label: 'Name', value: 'Thing In The Hall' },
+      { id: 'id', t: 'text', label: 'Entity id', value: 'hall-thing', tip: 'Short and unique: hall-thing' },
+      { id: 'num', t: 'text', label: 'Guide number', value: 'Entity 88' },
+      { id: 'cls', t: 'select', label: 'Class', opts: [] },
+      { id: 'size', t: 'text', label: 'Size line', value: '1.8 m' },
+    ] },
+    { title: 'Movement and senses', f: [
+      { id: 'speed', t: 'num', label: 'Walk speed (m/s)', min: 0, step: 0.1, value: 1 },
+      { id: 'chase', t: 'num', label: 'Chase speed', min: 0, step: 0.1, value: 3.6, tip: '0 = never chases' },
+      { id: 'detect', t: 'num', label: 'Sees you at (m)', min: 0, step: 0.5, value: 7 },
+    ] },
+    { title: 'Combat', f: [
+      { id: 'dmg', t: 'num', label: 'Damage per hit', min: 0, step: 1, value: 15 },
+      { id: 'reach', t: 'num', label: 'Reach (m)', min: 0, step: 0.05, value: 1.3 },
+      { id: 'cd', t: 'num', label: 'Seconds between hits', min: 0.1, step: 0.1, value: 1 },
+      { id: 'memory', t: 'num', label: 'Remembers you (s)', min: 0, step: 1, value: 3 },
+    ] },
+    { title: 'Field guide text', f: [
+      { id: 'desc', t: 'area', label: 'Description', value: 'Something new in the halls. It has not decided about you yet.' },
+      { id: 'notes', t: 'area', label: 'Notes', value: 'Written in the entity studio.' },
+      { id: 'tips', t: 'area', label: 'Tips (one per line)', value: 'Keep your distance.\nIt gives up quickly.' },
+    ] },
+    { title: 'Behaviour flags', flags: true },
+  ] },
+];
+
+// the paint options live in the option bar (always visible while painting)
+const BRUSH_FIELDS = [
+  { id: 'brushcolor', t: 'color', label: 'Colour', value: '#8a1f2a', bare: true },
+  { id: 'brushsize', t: 'range', label: 'Size', min: 0.005, max: 0.25, step: 0.005, value: 0.04, fmt: 'pct', tip: 'Share of the skin texture' },
+  { id: 'brushsoft', t: 'range', label: 'Softness', min: 0, max: 0.9, step: 0.05, value: 0.6, fmt: 'p2', tip: 'Hard edge to airbrush' },
+  { id: 'brushalpha', t: 'range', label: 'Opacity', min: 0.05, max: 1, step: 0.05, value: 0.85, fmt: 'p2' },
+  { id: 'brushtarget', t: 'select', label: 'Paint onto', cls: 'sel', bare: true, opts: [['auto', 'What the brush touches'], ['skin', 'The skin, always'], ['top', 'The top / shirt'], ['bottom', 'The bottom / trousers']] },
+];
+const SPEED_FIELD = { id: 'animspeed', t: 'range', label: 'Animation speed', min: 0, max: 2.5, step: 0.05, value: 1, fmt: 'x2' };
+
+const FMT = {
+  p2: (v) => (+v).toFixed(2),
+  x2: (v) => (+v).toFixed(2) + '×',
+  pct: (v) => (v * 100).toFixed(1) + '%',
+};
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+function fieldHTML(f) {
+  const tip = f.tip ? ' data-tip="' + esc(f.tip) + '"' : '';
+  const id = f.id;
+  switch (f.t) {
+    case 'range':
+      return '<div class="fld slider"' + tip + '><div class="fill" id="f_' + id + '"></div><span class="lab">' + esc(f.label) + '</span><span class="val" id="v_' + id + '"></span>' +
+        '<input type="range" id="' + id + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" value="' + f.value + '"></div>';
+    case 'num':
+      return '<div class="fld"' + tip + '><span class="lab">' + esc(f.label) + '</span><input type="number" id="' + id + '"' + (f.min !== undefined ? ' min="' + f.min + '"' : '') +
+        (f.max !== undefined ? ' max="' + f.max + '"' : '') + ' step="' + f.step + '" value="' + f.value + '"></div>';
+    case 'select': {
+      const opts = (f.opts || []).map((o) => '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>').join('');
+      return (f.bare ? '<div class="fld ' + (f.cls || '') + '"' + tip + '>' : '<div class="fld"' + tip + '><span class="lab">' + esc(f.label) + '</span>') +
+        '<select id="' + id + '">' + opts + '</select></div>';
+    }
+    case 'color':
+      if (f.bare) return '<div class="swatchwrap"' + tip + '><span>' + esc(f.label) + '</span><span class="colorf"><input type="color" id="' + id + '" value="' + f.value + '"></span></div>';
+      return '<div class="fld"' + tip + '><span class="lab">' + esc(f.label) + '</span><div class="colorf"><input type="color" id="' + id + '" value="' + f.value + '"><code id="h_' + id + '">' + f.value + '</code></div></div>';
+    case 'check':
+      return '<label class="chkf"' + tip + '><input type="checkbox" id="' + id + '"' + (f.value ? ' checked' : '') + '><span>' + esc(f.label) + '</span>' + (f.tipx ? '<small>' + esc(f.tipx) + '</small>' : '') + '</label>';
+    case 'text':
+      return '<div class="fld"' + tip + '><span class="lab">' + esc(f.label) + '</span><input type="text" id="' + id + '" value="' + esc(f.value) + '" spellcheck="false"></div>';
+    case 'area':
+      return '<div class="fld wide"><span class="lab">' + esc(f.label) + '</span><textarea id="' + id + '">' + esc(f.value) + '</textarea></div>';
+  }
+  return '';
+}
+
+function flagsHTML() {
+  return '<div class="flaggrid">' + FLAGS.map(([id, help]) =>
+    '<label class="chkf"><input type="checkbox" id="flag_' + id + '"><span>' + id + '</span><small>' + esc(help) + '</small></label>').join('') + '</div>';
+}
+
+function groupHTML(g) {
+  return '<div class="grp"><div class="grp-h" data-fold="1">' + esc(g.title) + '</div><div class="grp-b">' +
+    (g.flags ? flagsHTML() : g.f.map(fieldHTML).join('')) + '</div></div>';
+}
+
+const PALETTE = ['#f0d8c8', '#c9a68a', '#8c5a44', '#5a3a2e', '#2b1d18', '#0e0e0e', '#6e6e6e', '#f2f2f2',
+  '#8a1f2a', '#b3342c', '#6b0f14', '#d0552b', '#e9c46a', '#8aa06a', '#3f5a3a', '#2f4a5c',
+  '#4a5a78', '#7b6a9c', '#a89a7c', '#6a5a3c', '#3a342c', '#9fb4bf', '#d8cfc0', '#e8e0b0'];
+
+function exportHTML() {
+  return '<div class="tabtitle">Export</div><div class="tabsub">Put it in the game</div>' +
+    '<div class="grp"><div class="grp-h" data-fold="1">File</div><div class="grp-b">' +
+    fieldHTML({ id: 'filename', t: 'text', label: 'File name', value: 'hall-thing', tip: 'Saved inside entities/' }) +
+    '<div class="btnrow"><button type="button" class="btn pri" id="dl2">Download .js</button><button type="button" class="btn" id="copy">Copy the file</button>' +
+    '<button type="button" class="btn" id="openbtn">Open .js&hellip;</button></div>' +
+    '<p class="note">Files written here carry the studio\'s own state in a final comment, so <b>Open .js</b> restores every slider and every brush stroke.</p>' +
+    '</div></div>' +
+    '<div class="grp"><div class="grp-h" data-fold="1">Checks</div><div class="grp-b"><div id="problems"></div><div id="wire"></div></div></div>' +
+    '<div class="grp"><div class="grp-h" data-fold="1">Four steps</div><div class="grp-b"><ol class="steps">' +
+    '<li>Save the download as <code id="path1">entities/hall-thing.js</code></li>' +
+    '<li>Open <code>entities/loader.js</code> and add this line before <code>\'core/phobia-finish.js\'</code> so the game loads the file at all:<pre id="line1">    \'hall-thing.js\',</pre><div class="btnrow"><button type="button" class="btn" id="copyline">Copy the loader line</button></div></li>' +
+    '<li>Add the id to the <code>"entities"</code> array in the <code>GAME</code> block (alphabetical) of <code>other/level-studio.html</code> and <code>other/entity-studio.html</code>:<pre id="idline">    "hall-thing",</pre><div class="btnrow"><button type="button" class="btn" id="copyid">Copy the id line</button></div></li>' +
+    '<li>Reload the game. The entity viewer and the field guide pick it up by themselves.</li></ol></div></div>' +
+    '<div class="grp"><div class="grp-h" data-fold="1">The file it will write</div><div class="grp-b"><p class="note">Plain text - anything here can be edited by hand later.</p><pre id="file">-</pre></div></div>';
+}
+
+function paintHTML() {
+  return '<div class="tabtitle">Paint</div><div class="tabsub">The 3D brush writes into the skin and cloth textures</div>' +
+    '<div class="grp"><div class="grp-h" data-fold="1">Palette</div><div class="grp-b"><div class="pal" id="palette">' +
+    PALETTE.map((c) => '<i data-c="' + c + '" style="background:' + c + '" title="' + c + '"></i>').join('') +
+    '</div><p class="note">Recent</p><div class="pal" id="recent"></div></div></div>' +
+    '<div class="grp"><div class="grp-h" data-fold="1">Strokes</div><div class="grp-b"><div class="strokes" id="strokes"></div>' +
+    '<div class="btnrow"><button type="button" class="btn" id="paintundo">Undo a stroke</button><button type="button" class="btn dng" id="paintclear">Clear all paint</button>' +
+    '<span class="badge" id="paintinfo">no paint yet</span></div></div></div>' +
+    '<div class="grp"><div class="grp-h" data-fold="1">How it works</div><div class="grp-b"><p class="note">' +
+    '<b>Brush</b> lays colour, <b>Spray</b> scatters small dabs (stains, mud, freckles), <b>Eraser</b> removes the dabs under it, ' +
+    '<b>Eyedropper</b> takes a colour from the model, <b>Fill</b> tints the whole skin or cloth. Miss the model and the drag orbits instead.</p>' +
+    '<p class="note">The dabs are written into the creature\'s own texture, so they cost nothing while the game runs and ship inside the file. ' +
+    'A texture is shared by every limb that wears it, so a mark on one arm shows on the other too - exactly as in the game. Eyes, teeth and shoes are flat colours and cannot be painted. ' +
+    'Set the pose to <b>Idle</b> while you paint.</p></div></div>';
+}
+
+// ------------------------------------------------------------------ small helpers
+const FIELD_IDS = [];
+for (const t of TABS) for (const g of t.groups) { if (g.f) for (const f of g.f) FIELD_IDS.push(f.id); }
+for (const [id] of FLAGS) FIELD_IDS.push('flag_' + id);
+FIELD_IDS.push('filename');
+
+function getValues() {
+  const v = {};
+  for (const id of FIELD_IDS) { const el = $(id); if (el) v[id] = el.type === 'checkbox' ? !!el.checked : el.value; }
+  return v;
+}
+function syncField(el) {
+  if (!el || !el.id) return;
+  const id = el.id;
+  if (el.type === 'range') {
+    const min = parseFloat(el.min), max = parseFloat(el.max), v = parseFloat(el.value);
+    const f = $('f_' + id), val = $('v_' + id);
+    if (f) f.style.width = (clampRange((v - min) / ((max - min) || 1), 0, 1) * 100) + '%';
+    const meta = findField(id);
+    if (val) val.textContent = (FMT[meta && meta.fmt] || FMT.p2)(v);
+  } else if (el.type === 'color') {
+    const h = $('h_' + id); if (h) h.textContent = el.value;
+  }
+}
+function syncAll() { for (const id of [...FIELD_IDS, ...BRUSH_FIELDS.map((f) => f.id), 'animspeed']) syncField($(id)); }
+const _fieldIndex = {};
+function findField(id) {
+  if (_fieldIndex[id]) return _fieldIndex[id];
+  for (const t of TABS) for (const g of t.groups) if (g.f) for (const f of g.f) if (f.id === id) return (_fieldIndex[id] = f);
+  for (const f of [...BRUSH_FIELDS, SPEED_FIELD]) if (f.id === id) return (_fieldIndex[id] = f);
+  return null;
+}
+function setValues(v) {
+  for (const id of Object.keys(v)) {
+    const el = $(id); if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!v[id]; else el.value = v[id];
+  }
+  syncAll();
+}
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage full or blocked */ } }
+let toastT = 0;
+function toast(msg) {
+  const t = $('vtoast'); if (!t) return;
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1800);
+}
+function flashButton(id, text, back) { const b = $(id); if (!b) return; b.textContent = text; setTimeout(() => { b.textContent = back; }, 1200); }
+
+// ------------------------------------------------------------------ state, history, autosave
+const VERSION = 2;
+function stateObject() {
+  return { app: 'entity-studio', ver: VERSION, seed, v: getValues(), p: painting.map((s) => ({ role: s.role, tool: s.tool || 'brush', dabs: s.dabs })) };
+}
+function stateJSON() { return JSON.stringify(stateObject()); }
+let paintRev = 0, _pj = null, _pjRev = -1;
+function paintJSON() { if (_pjRev !== paintRev) { _pj = JSON.stringify(painting); _pjRev = paintRev; } return _pj; }
+
+const hist = { stack: [], i: -1 };
+function sameValues(a, b) { for (const k of Object.keys(a)) if (a[k] !== b[k]) return false; return true; }
+function snapshot() {
+  const s = { v: getValues(), p: paintJSON(), seed };
+  const last = hist.stack[hist.i];
+  if (last && last.p === s.p && sameValues(last.v, s.v)) return;
+  hist.stack.length = hist.i + 1;
+  hist.stack.push(s);
+  if (hist.stack.length > 120) hist.stack.shift();
+  hist.i = hist.stack.length - 1;
+  lsSet('lb.es.autosave', stateJSON());
+  renderHistory();
+}
+function restore(s) {
+  setValues(s.v);
+  painting = JSON.parse(s.p); stroke = null; paintRev++;
+  seed = s.seed || seed;
+  update(false);
+}
+function undo() { if (hist.i > 0) { hist.i--; restore(hist.stack[hist.i]); toast('Undo'); } else toast('Nothing to undo'); renderHistory(); }
+function redo() { if (hist.i < hist.stack.length - 1) { hist.i++; restore(hist.stack[hist.i]); toast('Redo'); } else toast('Nothing to redo'); renderHistory(); }
+function renderHistory() { const e = $('sthist'); if (e) e.textContent = 'history ' + (hist.i + 1) + '/' + hist.stack.length; }
+
+function applyState(obj) {
+  if (!obj || obj.app !== 'entity-studio') throw new Error('not a studio state');
+  setValues(obj.v || {});
+  painting = (obj.p || []).map((s) => ({ role: s.role, tool: s.tool || 'brush', dabs: s.dabs || [] }));
+  stroke = null; paintRev++;
+  seed = obj.seed || 1;
+  $('filename').dataset.touched = '1';
+  needFrame = true;
+  update(false);
+  snapshot();
+}
+
+// ------------------------------------------------------------------ viewport state
+let renderer = null, scene = null, persp = null, ortho = null, camera = null;
+let hemi = null, key = null, rim = null, flash = null, floorMesh = null, gridMesh = null;
+let rulerGrp = null, humanGrp = null, ring = null, hiBox = null;
+let current = null, seed = 1, needFrame = true, lastFrameH = 0;
+const cam = { target: new THREE.Vector3(0, 0.9, 0), yaw: 0.7, pitch: 0.22, dist: 4.5, want: 4.5 };
+const VS = Object.assign({ shading: 'material', ortho: false, grid: true, floor: true, ruler: true, human: false, shadows: true, turn: false, light: 'studio', bg: 'dark', play: true },
+  (() => { try { return JSON.parse(lsGet('lb.es.view') || '{}'); } catch (e) { return {}; } })());
+VS.play = true; VS.ortho = !!VS.ortho;
+const clayMat = new THREE.MeshStandardMaterial({ color: 0xb9b4aa, roughness: 0.85, metalness: 0 });
+const BGS = { dark: 0x191712, grey: 0x484848, light: 0xb4b4b0 };
+const LIGHTS = {
+  hallway: { hemi: [0xffe9c4, 0x2a2218, 0.55], key: [0xffe8b0, 1.7, [2, 9, 3]], rim: [0x8fa8ff, 0.35, [-5, 3, -6]], flash: false },
+  studio: { hemi: [0xdfe6ff, 0x3a3228, 1.0], key: [0xfff0d8, 2.4, [4, 8, 5]], rim: [0x8fa8ff, 0.9, [-5, 3, -6]], flash: false },
+  dark: { hemi: [0x202028, 0x050505, 0.1], key: [0xfff0d8, 0, [4, 8, 5]], rim: [0x8fa8ff, 0.08, [-5, 3, -6]], flash: true },
+};
+function saveView() { lsSet('lb.es.view', JSON.stringify(VS)); }
+
+function makeLabel(text) {
+  const c = document.createElement('canvas'); c.width = 96; c.height = 40;
+  const g = c.getContext('2d');
+  g.font = 'bold 26px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#ffffff';
+  g.fillText(text, 48, 22);
+  const tex = new THREE.CanvasTexture(c);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, opacity: 0.85 }));
+  sp.scale.set(0.3, 0.125, 1); sp.renderOrder = 998;
+  return sp;
+}
+
+function initPreview() {
+  const canvas = $('c');
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  } catch (e) {
+    const n = $('novgl');
+    if (n) { n.style.display = 'grid'; n.textContent = 'No 3D preview in this browser (' + (e && e.message) + '). Everything else still works - the file is still written.'; }
+    renderer = null;
+    return;
+  }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  installGlobalPatches();
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(BGS[VS.bg]);
+  scene.fog = new THREE.Fog(BGS[VS.bg], 16, 42);
+  persp = new THREE.PerspectiveCamera(42, 1, 0.05, 400);
+  ortho = new THREE.OrthographicCamera(-2, 2, 2, -2, -100, 400);
+  camera = VS.ortho ? ortho : persp;
+  hemi = new THREE.HemisphereLight(0xdfe6ff, 0x3a3228, 0.9);
+  key = new THREE.DirectionalLight(0xfff0d8, 2.2);
+  key.position.set(4, 8, 5);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  Object.assign(key.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 0.5, far: 40 });
+  key.shadow.bias = -0.0004;
+  rim = new THREE.DirectionalLight(0x8fa8ff, 0.8);
+  rim.position.set(-5, 3, -6);
+  flash = new THREE.SpotLight(0xfff2d8, 42, 30, 0.46, 0.62, 1.5);
+  scene.add(hemi, key, key.target, rim, flash, flash.target);
+  floorMesh = new THREE.Mesh(new THREE.CircleGeometry(400, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x2a2824, roughness: 0.95 }));
+  floorMesh.receiveShadow = true;
+  scene.add(floorMesh);
+  gridMesh = new THREE.GridHelper(20, 40, 0xe9c46a, 0x6b6451);
+  gridMesh.material.transparent = true; gridMesh.material.opacity = 0.24; gridMesh.position.y = 0.002;
+  scene.add(gridMesh);
+  // origin axes: red x, blue z (green y is the ruler)
+  const ax = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-10, 0.004, 0), new THREE.Vector3(10, 0.004, 0), new THREE.Vector3(0, 0.004, -10), new THREE.Vector3(0, 0.004, 10)]),
+    new THREE.LineBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.35 }));
+  ax.name = 'axes'; scene.add(ax);
+  rulerGrp = new THREE.Group(); scene.add(rulerGrp);
+  humanGrp = new THREE.Group();
+  const hm = new THREE.MeshStandardMaterial({ color: 0x6c8ebf, roughness: 0.7, transparent: true, opacity: 0.38, depthWrite: false });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.21, 1.1, 6, 14), hm); body.position.y = 0.95;
+  const hd = new THREE.Mesh(new THREE.SphereGeometry(0.115, 16, 12), hm); hd.position.y = 1.7;
+  humanGrp.add(body, hd); scene.add(humanGrp);
+  ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 56), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, depthTest: false, transparent: true, opacity: 0.9 }));
+  ring.renderOrder = 999; ring.visible = false; scene.add(ring);
+  hiBox = new THREE.Box3Helper(new THREE.Box3(new THREE.Vector3(-0.1, 0, -0.1), new THREE.Vector3(0.1, 0.2, 0.1)), 0xe9c46a);
+  hiBox.visible = false; hiBox.material.depthTest = false; hiBox.renderOrder = 997; scene.add(hiBox);
+  setLighting(VS.light);
+  applyOverlays();
+
+  // ---- pointer input -----------------------------------------------------
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('pointerdown', onDown);
+  canvas.addEventListener('pointermove', onMove);
+  canvas.addEventListener('pointerup', onUp);
+  canvas.addEventListener('pointercancel', onUp);
+  canvas.addEventListener('pointerleave', () => { hoverEv = null; if (ring) ring.visible = false; });
+  canvas.addEventListener('dblclick', () => { if (tool === 'select') frameView(); });
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    cam.want = clampRange(cam.want * Math.exp(e.deltaY * 0.0012), 0.5, 40);
+  }, { passive: false });
+  const gz = $('gizmo');
+  gz.addEventListener('pointerdown', (e) => {
+    const r = gz.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width * 192, y = (e.clientY - r.top) / r.height * 192;
+    let best = null, bd = 18;
+    for (const h of gizmoHits) { const d = Math.hypot(h.x - x, h.y - y); if (d < bd) { bd = d; best = h; } }
+    if (best) { setView(best.view); e.preventDefault(); }
+  });
+}
+
+function setLighting(name) {
+  if (!hemi) return;
+  const L = LIGHTS[name] || LIGHTS.hallway;
+  VS.light = name;
+  hemi.color.setHex(L.hemi[0]); hemi.groundColor.setHex(L.hemi[1]); hemi.intensity = L.hemi[2];
+  key.color.setHex(L.key[0]); key.intensity = L.key[1]; key.position.set(...L.key[2]);
+  rim.color.setHex(L.rim[0]); rim.intensity = L.rim[1]; rim.position.set(...L.rim[2]);
+  flash.visible = !!L.flash;
+  saveView();
+}
+function setBackground(name) {
+  VS.bg = name;
+  if (!scene) return;
+  scene.background.setHex(BGS[name]); scene.fog.color.setHex(BGS[name]);
+  floorMesh.material.color.setHex(name === 'light' ? 0x8e8c86 : name === 'grey' ? 0x3a3a3a : 0x2a2824);
+  saveView();
+}
+function applyOverlays() {
+  if (!scene) return;
+  gridMesh.visible = VS.grid;
+  const ax = scene.getObjectByName('axes'); if (ax) ax.visible = VS.grid;
+  floorMesh.visible = VS.floor;
+  rulerGrp.visible = VS.ruler;
+  humanGrp.visible = VS.human;
+  renderer.shadowMap.enabled = VS.shadows;
+  key.castShadow = VS.shadows;
+  floorMesh.receiveShadow = VS.shadows;
+  setBackground(VS.bg);
+  buildRuler();
+  saveView();
+}
+function buildRuler() {
+  if (!rulerGrp) return;
+  while (rulerGrp.children.length) { const c = rulerGrp.children.pop(); if (c.geometry) c.geometry.dispose(); if (c.material) { if (c.material.map) c.material.map.dispose(); c.material.dispose(); } }
+  const r = current ? Math.max(current.model.radius || 0.4, 0.3) : 0.5;
+  const top = Math.max(2, Math.ceil((current ? current.model.height || 1.8 : 1.8) + 0.5));
+  const pts = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, top, 0)];
+  for (let i = 0; i <= top * 4; i++) { const y = i / 4, L = i % 4 === 0 ? 0.14 : 0.07; pts.push(new THREE.Vector3(0, y, 0), new THREE.Vector3(L, y, 0)); }
+  const line = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xe9c46a, transparent: true, opacity: 0.8, depthTest: false }));
+  line.renderOrder = 996; rulerGrp.add(line);
+  for (let m = 1; m <= top; m++) { const s = makeLabel(m + ' m'); s.position.set(0.32, m, 0); rulerGrp.add(s); }
+  rulerGrp.position.set(r + 0.75, 0, 0);
+  humanGrp.position.set(-(r + 0.8), 0, 0);
+}
+
+function disposeCurrent() {
+  if (!current) return;
+  scene.remove(current.holder);
+  current.model.root.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    const orig = o.userData._m || o.material;
+    if (orig) for (const m of (Array.isArray(orig) ? orig : [orig])) { if (m.map) m.map.dispose(); if (m.bumpMap) m.bumpMap.dispose(); }
+  });
+  current = null;
+}
+
+function frameView() {
+  if (!current) return;
+  const m = current.model;
+  const h = Math.max(m.height || 1.8, 0.5), r = Math.max(m.radius || 0.4, 0.2);
+  cam.want = clampRange(Math.max(h, r * 2.2) * 1.75 + 0.9, 1.4, 30);
+  cam.target.set(0, h * 0.5, 0);
+  const reach = Math.max(8, h * 1.8);
+  const sc = key.shadow.camera;
+  sc.left = -reach; sc.right = reach; sc.top = reach; sc.bottom = -reach; sc.far = reach * 5;
+  sc.updateProjectionMatrix();
+  lastFrameH = h;
+}
+function setView(v) {
+  const V = { front: [0, 0.08], back: [Math.PI, 0.08], left: [Math.PI / 2, 0.08], right: [-Math.PI / 2, 0.08], top: [cam.yaw, 1.5], bottom: [cam.yaw, -1.2] }[v];
+  if (!V) return;
+  cam.yaw = V[0]; cam.pitch = V[1];
+  toast(v[0].toUpperCase() + v.slice(1) + ' view');
+}
+function setOrtho(on) {
+  VS.ortho = !!on;
+  if (renderer) camera = VS.ortho ? ortho : persp;
+  saveView(); refreshViewButtons();
+  toast(VS.ortho ? 'Orthographic' : 'Perspective');
+}
+function applyShading() {
+  VS.shading = VS.shading || 'material';
+  if (!current) return;
+  current.model.root.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.userData._m === undefined) o.userData._m = o.material;
+    const orig = o.userData._m;
+    if (VS.shading === 'clay') o.material = clayMat;
+    else {
+      o.material = orig;
+      for (const m of (Array.isArray(orig) ? orig : [orig])) m.wireframe = VS.shading === 'wire';
+    }
+  });
+}
+function setShading(s) { VS.shading = s; applyShading(); saveView(); refreshViewButtons(); }
+
+// ------------------------------------------------------------------ the 3D brush
+// A mark is stored as a stroke (one per drag) and drawn straight into the texture
+// canvas so the preview answers immediately - but the strokes are also the source of
+// truth, because rebuild() throws every texture away (models-kit caches them by name
+// for the whole page). The emitted file replays the strokes, so the preview, the
+// entity viewer and the game all end up wearing exactly the same paint.
+let painting = [];   // [{ role: 'skin' | 'top' | 'bottom', tool, dabs: [[u, v, r, colour, softness, strength], ...] }]
+let stroke = null;   // the drag in progress
+const PAINT_MAX = 4000;
+
+function entityId() { return ($('id').value.trim() || 'my-entity').replace(/[^a-z0-9_-]/gi, '-').toLowerCase(); }
+function texNameFor(role) {
+  if (role === 'skin') return entityId() + '-skin';
+  if (role === 'top') return $('clothes').checked ? entityId() + '-clothing' : null;
+  if (role === 'bottom') return $('clothes').checked ? entityId() + '-trousers' : entityId() + '-hide';
+  return null;
+}
+function texFor(role) {
+  const name = texNameFor(role);
+  return name ? M['src/entities/models.js'].HELPERS.TEX[name] || null : null;
+}
+function clearTextures() {
+  const T = M['src/entities/models.js'].HELPERS.TEX;
+  for (const k of Object.keys(T)) delete T[k];
+}
+
+const pickRay = new THREE.Raycaster();
+function pickModel(e) {
+  if (!current || !renderer) return null;
+  const rect = $('c').getBoundingClientRect();
+  pickRay.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+  const hits = pickRay.intersectObject(current.model.root, true);
+  return hits.length ? hits[0] : null;
+}
+function roleOfMesh(o) {
+  const m0 = o.userData._m || o.material;
+  const m = Array.isArray(m0) ? m0[0] : m0;
+  const img = m && m.map && m.map.image;
+  if (img) for (const role of ['skin', 'top', 'bottom']) { const t = texFor(role); if (t && t.canvas === img) return role; }
+  return null;
+}
+function roleOfHit(hit) {
+  const r = roleOfMesh(hit.object);
+  if (r) return r;
+  const forced = $('brushtarget').value;
+  return forced !== 'auto' && texFor(forced) ? forced : null;
+}
+function brush() {
+  return {
+    colour: /^#[0-9a-f]{6}$/i.test($('brushcolor').value) ? $('brushcolor').value : '#ffffff',
+    radius: clampRange(num('brushsize'), 0.005, 0.25),
+    soft: clampRange(num('brushsoft'), 0, 0.9),
+    alpha: clampRange(num('brushalpha'), 0.05, 1),
+  };
+}
+function metresPerUv(hit) {
+  const g = hit.object.geometry, f = hit.face;
+  if (!g || !f || !g.attributes.uv) return 1;
+  const p = g.attributes.position, uv = g.attributes.uv;
+  const A = new THREE.Vector3().fromBufferAttribute(p, f.a), B = new THREE.Vector3().fromBufferAttribute(p, f.b), C = new THREE.Vector3().fromBufferAttribute(p, f.c);
+  const w = B.sub(A).cross(C.sub(A)).length() / 2;
+  const ua = (uv.getX(f.b) - uv.getX(f.a)) * (uv.getY(f.c) - uv.getY(f.a)) - (uv.getX(f.c) - uv.getX(f.a)) * (uv.getY(f.b) - uv.getY(f.a));
+  const uA = Math.abs(ua) / 2;
+  if (uA < 1e-9 || !(w > 0)) return 1;
+  return Math.sqrt(w / uA) * hit.object.matrixWorld.getMaxScaleOnAxis();
+}
+
+function paintDab(role, u, v, colour, radius, soft, alpha) {
+  const t = texFor(role);
+  if (!t) return;
+  const c = t.canvas, g = c.getContext('2d');
+  const hex = /^#(..)(..)(..)$/.exec(colour);
+  const rgb = hex ? [parseInt(hex[1], 16), parseInt(hex[2], 16), parseInt(hex[3], 16)] : [255, 255, 255];
+  const x = u * c.width, y = (1 - v) * c.height, rad = Math.max(1, radius * c.width);
+  const gr = g.createRadialGradient(x, y, Math.max(0, rad * (1 - soft)), x, y, rad);
+  gr.addColorStop(0, 'rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',' + alpha + ')');
+  gr.addColorStop(1, 'rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',0)');
+  g.fillStyle = gr;
+  g.beginPath(); g.arc(x, y, rad, 0, Math.PI * 2); g.fill();
+  t.map.needsUpdate = true;
+}
+function totalDabs() { return painting.reduce((a, s) => a + s.dabs.length, 0); }
+function pushDab(role, u, v, o) {
+  if (totalDabs() >= PAINT_MAX) { renderPaintInfo('that is as much paint as one creature can hold'); return false; }
+  const b = brush();
+  const r = o && o.r ? o.r : b.radius, soft = o && o.soft !== undefined ? o.soft : b.soft, a = o && o.a ? o.a : b.alpha;
+  if (!stroke) { stroke = { role, tool, dabs: [] }; painting.push(stroke); }
+  const cu = +u.toFixed(4), cv = +v.toFixed(4);
+  stroke.dabs.push([cu, cv, +r.toFixed(4), b.colour, +soft.toFixed(2), +a.toFixed(2)]);
+  paintDab(role, cu, cv, b.colour, r, soft, a);
+  paintRev++;
+  return true;
+}
+function sprayAt(role, u, v) {
+  const b = brush();
+  for (let i = 0; i < 6; i++) {
+    const a = Math.random() * 6.283, d = Math.sqrt(Math.random()) * b.radius * 1.6;
+    pushDab(role, u + Math.cos(a) * d, v + Math.sin(a) * d, { r: Math.max(0.003, b.radius * (0.1 + Math.random() * 0.14)), soft: 0.7, a: Math.min(1, b.alpha * (0.45 + Math.random() * 0.5)) });
+  }
+}
+function eraseAt(role, u, v) {
+  const r = brush().radius;
+  let removed = 0;
+  for (const s of painting) {
+    if (s.role !== role) continue;
+    const keep = s.dabs.filter((d) => d[2] >= 1 || Math.hypot(d[0] - u, d[1] - v) > r);
+    removed += s.dabs.length - keep.length;
+    s.dabs = keep;
+  }
+  if (removed) { painting = painting.filter((s) => s.dabs.length); stroke = null; paintRev++; scheduleRepaint(); }
+}
+let repaintT = 0;
+function scheduleRepaint() { if (repaintT) return; repaintT = setTimeout(() => { repaintT = 0; rebuild(false); renderPaintInfo(); }, 90); }
+
+function pushRecent(c) {
+  let r; try { r = JSON.parse(lsGet('lb.es.recent') || '[]'); } catch (e) { r = []; }
+  r = [c, ...r.filter((x) => x !== c)].slice(0, 16);
+  lsSet('lb.es.recent', JSON.stringify(r));
+  renderRecent();
+}
+function renderRecent() {
+  const el = $('recent'); if (!el) return;
+  let r; try { r = JSON.parse(lsGet('lb.es.recent') || '[]'); } catch (e) { r = []; }
+  el.innerHTML = r.map((c) => '<i data-c="' + c + '" style="background:' + c + '" title="' + c + '"></i>').join('') || '<span class="note">Colours you use show up here.</span>';
+}
+function setBrushColour(c) { $('brushcolor').value = c; pushRecent(c); }
+
+function renderPaintInfo(note) {
+  const n = totalDabs();
+  const roles = [...new Set(painting.map((s) => s.role))];
+  const txt = note || (n ? n + ' mark' + (n === 1 ? '' : 's') + ' on the ' + roles.join(' / ') : 'no paint yet');
+  const pi = $('paintinfo'); if (pi) pi.textContent = txt;
+  const sp = $('stpaint'); if (sp) sp.textContent = n ? 'paint ' + n + '/' + PAINT_MAX : '';
+  const el = $('strokes');
+  if (el) {
+    const rows = ['skin', 'top', 'bottom'].map((r) => {
+      const c = painting.filter((s) => s.role === r).reduce((a, s) => a + s.dabs.length, 0);
+      return c ? '<div class="srow"><span style="flex:1">' + r + '</span><span class="badge">' + c + '</span><button type="button" class="btn dng" data-clear="' + r + '">Clear</button></div>' : '';
+    }).join('');
+    el.innerHTML = rows || '<p class="note">Nothing painted yet. Pick the brush (B) and drag over the creature.</p>';
+  }
+}
+
+function fillAt(hit) {
+  const role = roleOfHit(hit);
+  if (!role) return renderPaintInfo('that part is a flat colour - aim at the skin or the clothes');
+  const b = brush();
+  stroke = { role, tool: 'fill', dabs: [] }; painting.push(stroke);
+  // one huge dab centred on the texture: fully opaque out to every corner
+  stroke.dabs.push([0.5, 0.5, 2, b.colour, 0.5, +b.alpha.toFixed(2)]);
+  paintDab(role, 0.5, 0.5, b.colour, 2, 0.5, b.alpha);
+  stroke = null; paintRev++;
+  pushRecent(b.colour);
+  finishPaint();
+}
+function pickAt(hit) {
+  const role = roleOfMesh(hit.object);
+  let hex = null;
+  const t = role && hit.uv ? texFor(role) : null;
+  if (t) {
+    const c = t.canvas, d = c.getContext('2d').getImageData(Math.min(c.width - 1, Math.max(0, Math.floor(hit.uv.x * c.width))), Math.min(c.height - 1, Math.max(0, Math.floor((1 - hit.uv.y) * c.height))), 1, 1).data;
+    hex = '#' + [d[0], d[1], d[2]].map((n) => n.toString(16).padStart(2, '0')).join('');
+  } else {
+    const m0 = hit.object.userData._m || hit.object.material, m = Array.isArray(m0) ? m0[0] : m0;
+    if (m && m.color) hex = '#' + m.color.getHexString();
+  }
+  if (hex) { setBrushColour(hex); toast('Picked ' + hex); }
+}
+
+function beginPaint(e) {
+  const hit = pickModel(e);
+  if (!hit) { renderPaintInfo('nothing under the brush'); return 'orbit'; }
+  if (tool === 'pick') { pickAt(hit); return 'none'; }
+  if (tool === 'fill') { fillAt(hit); return 'none'; }
+  const role = roleOfHit(hit);
+  if (!role) { renderPaintInfo('that part has no texture - eyes, teeth and shoes are flat colours. Aim at the skin or the clothes'); return 'none'; }
+  stroke = null;
+  strokeRole = role;
+  paintAt(hit);
+  pushRecent(brush().colour);
+  return 'paint';
+}
+let strokeRole = 'skin', lastUV = null;
+function paintAt(hit) {
+  if (!hit || !hit.uv) return;
+  const u = hit.uv.x, v = hit.uv.y, b = brush();
+  if (tool === 'erase') { eraseAt(strokeRole, u, v); lastUV = [u, v]; return; }
+  if (tool === 'spray') { sprayAt(strokeRole, u, v); lastUV = [u, v]; return; }
+  if (lastUV && stroke) {
+    // the pointer jumps between frames: stamp along the way so the line comes out solid
+    const steps = Math.min(40, Math.ceil(Math.hypot(u - lastUV[0], v - lastUV[1]) / Math.max(0.004, b.radius * 0.5)));
+    for (let i = 1; i < steps; i++) { const t = i / steps; pushDab(strokeRole, lastUV[0] + (u - lastUV[0]) * t, lastUV[1] + (v - lastUV[1]) * t); }
+  }
+  pushDab(strokeRole, u, v);
+  lastUV = [u, v];
+}
+function finishPaint() {
+  stroke = null; lastUV = null;
+  update(false);
+  snapshot();
+  renderPaintInfo();
+}
+
+// ------------------------------------------------------------------ tools
+let tool = 'select';
+const TOOLS = [
+  ['select', 'Orbit / Select', 'V', 'Drag: orbit  |  Shift+drag or middle button: pan  |  Ctrl+drag: zoom  |  wheel: zoom  |  double-click or F: frame the creature'],
+  ['brush', 'Brush', 'B', 'Drag over the creature to lay down colour. Miss the model and the drag orbits. Right button always orbits. [ and ] change the size'],
+  ['spray', 'Spray', 'A', 'Scatters small dabs - stains, mud, freckles, rust'],
+  ['erase', 'Eraser', 'E', 'Removes the paint dabs under the brush (the base skin is never touched)'],
+  ['pick', 'Eyedropper', 'I', 'Click the creature to take its colour into the brush'],
+  ['fill', 'Fill', 'U', 'Click to tint the whole skin or cloth with the brush colour and opacity'],
+];
+const isPaintTool = () => tool !== 'select';
+function buildToolbox() {
+  const box = $('toolbox'); box.innerHTML = '';
+  for (const [id, label, k] of TOOLS) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'tool' + (id === tool ? ' on' : ''); b.title = label + ' (' + k + ')';
+    b.dataset.tool = id; b.setAttribute('data-tip', label + ' (' + k + ')');
+    b.innerHTML = ICON[id] + '<span class="kbd">' + k + '</span>';
+    b.addEventListener('click', () => setTool(id));
+    box.appendChild(b);
+    if (id === 'select') { const hr = document.createElement('hr'); box.appendChild(hr); }
+  }
+}
+function setTool(id) {
+  tool = id;
+  const t = TOOLS.find((x) => x[0] === id) || TOOLS[0];
+  for (const b of document.querySelectorAll('.tool')) b.classList.toggle('on', b.dataset.tool === id);
+  const c = $('c');
+  c.classList.toggle('paint', id !== 'select' && id !== 'pick');
+  c.classList.toggle('pick', id === 'pick');
+  $('tname').textContent = t[1];
+  $('hintline').textContent = t[3];
+  $('paintopts').style.display = id === 'select' ? 'none' : 'flex';
+  const showSoft = id === 'brush' || id === 'spray';
+  const sf = $('brushsoft'); if (sf && sf.parentNode) sf.parentNode.style.display = showSoft ? '' : 'none';
+  if (id !== 'select' && $('pose').value !== 'idle') setPose('idle', true);
+  if (id !== 'select') showTab('paint');
+  if (ring && id === 'select') ring.visible = false;
+}
+
+// ------------------------------------------------------------------ pointer handling
+let drag = null, hoverEv = null;
+function onDown(e) {
+  if (!renderer) return;
+  $('c').focus();
+  let mode = null;
+  const paintTool = isPaintTool();
+  if (e.button === 1) mode = 'pan';
+  else if (e.button === 2) mode = e.shiftKey ? 'pan' : 'orbit';
+  else if (e.button === 0) {
+    if (e.altKey) mode = 'orbit';
+    else if (e.shiftKey && !paintTool) mode = 'pan';
+    else if (e.ctrlKey && !paintTool) mode = 'zoom';
+    else if (paintTool) { mode = beginPaint(e); if (mode === 'none') { e.preventDefault(); return; } }
+    else mode = 'orbit';
+  }
+  if (!mode) return;
+  drag = { mode, lx: e.clientX, ly: e.clientY };
+  $('c').setPointerCapture(e.pointerId);
+  if (mode !== 'paint') $('c').classList.add('grabbing');
+  e.preventDefault();
+}
+function onMove(e) {
+  if (drag) {
+    const dx = e.clientX - drag.lx, dy = e.clientY - drag.ly;
+    if (drag.mode === 'paint') { paintAt(pickModel(e)); }
+    else if (drag.mode === 'orbit') {
+      cam.yaw -= dx * 0.0065;
+      cam.pitch = clampRange(cam.pitch + dy * 0.0065, -1.45, 1.52);
+    } else if (drag.mode === 'pan') {
+      const rect = $('c').getBoundingClientRect();
+      const k = 2 * cam.dist * Math.tan((persp.fov * Math.PI) / 360) / Math.max(1, rect.height);
+      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0), up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+      cam.target.addScaledVector(right, -dx * k).addScaledVector(up, dy * k);
+      cam.target.y = Math.max(-0.5, cam.target.y);
+    } else if (drag.mode === 'zoom') {
+      cam.want = clampRange(cam.want * Math.exp(dy * 0.006), 0.5, 40);
+    }
+    drag.lx = e.clientX; drag.ly = e.clientY;
+    return;
+  }
+  hoverEv = { clientX: e.clientX, clientY: e.clientY };
+}
+function onUp() {
+  if (!drag) return;
+  const was = drag.mode;
+  drag = null;
+  $('c').classList.remove('grabbing');
+  if (was === 'paint') finishPaint();
+}
+function hoverTick() {
+  if (!hoverEv || drag || !renderer) return;
+  const e = hoverEv; hoverEv = null;
+  const hit = pickModel(e);
+  const info = $('tip');
+  if (!hit) { ring.visible = false; return; }
+  if (isPaintTool() && tool !== 'fill' && tool !== 'pick') {
+    const b = brush();
+    const rw = clampRange(b.radius * metresPerUv(hit) * (tool === 'spray' ? 1.6 : 1), 0.004, 3);
+    ring.visible = true;
+    ring.position.copy(hit.point);
+    ring.quaternion.copy(camera.quaternion);
+    ring.scale.setScalar(rw);
+  } else ring.visible = false;
+  const role = roleOfMesh(hit.object);
+  if (info && !info.dataset.lock) info.textContent = 'Surface: ' + (role ? role + (role === 'skin' || role === 'top' || role === 'bottom' ? ' (paintable)' : '') : 'flat colour (eyes, teeth, shoes, horns)');
+}
+
+// ------------------------------------------------------------------ gizmo
+let gizmoHits = [];
+function drawGizmo() {
+  const cv = $('gizmo'); if (!cv || !camera) return;
+  const g = cv.getContext('2d'), W = 192, C = 96, R = 62;
+  g.clearRect(0, 0, W, W);
+  const inv = camera.quaternion.clone().invert();
+  const axes = [
+    ['x', new THREE.Vector3(1, 0, 0), '#e8524a', 'left'], ['-x', new THREE.Vector3(-1, 0, 0), '#e8524a', 'right'],
+    ['y', new THREE.Vector3(0, 1, 0), '#7fd34a', 'top'], ['-y', new THREE.Vector3(0, -1, 0), '#7fd34a', 'bottom'],
+    ['z', new THREE.Vector3(0, 0, 1), '#4a8ee8', 'front'], ['-z', new THREE.Vector3(0, 0, -1), '#4a8ee8', 'back'],
+  ].map(([n, v, col, view]) => { const p = v.clone().applyQuaternion(inv); return { n, col, view, x: C + p.x * R, y: C - p.y * R, z: p.z }; });
+  g.fillStyle = 'rgba(30,30,30,0.35)'; g.beginPath(); g.arc(C, C, 90, 0, Math.PI * 2); g.fill();
+  axes.sort((a, b) => a.z - b.z);
+  gizmoHits = [];
+  g.font = 'bold 16px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (const a of axes) {
+    const pos = a.n[0] !== '-';
+    if (pos) { g.strokeStyle = a.col; g.lineWidth = 4; g.beginPath(); g.moveTo(C, C); g.lineTo(a.x, a.y); g.stroke(); }
+    g.beginPath(); g.arc(a.x, a.y, pos ? 15 : 11, 0, Math.PI * 2);
+    if (pos) { g.fillStyle = a.col; g.fill(); g.fillStyle = '#111'; g.fillText(a.n.toUpperCase(), a.x, a.y + 1); }
+    else { g.fillStyle = 'rgba(40,40,40,0.8)'; g.fill(); g.strokeStyle = a.col; g.lineWidth = 2; g.stroke(); }
+    gizmoHits.push({ x: a.x, y: a.y, view: a.view });
+  }
+}
+
+// ------------------------------------------------------------------ rebuild + frame loop
+function rebuild(reseed) {
+  if (!renderer) return;
+  const built = buildFile();
+  let ok = true;
+  try {
+    new Function(built.text)();
+  } catch (e) {
+    ok = false;
+    $('problems').innerHTML = '<p class="warn">The generated file threw an error: ' + esc(e && e.message) + '</p>';
+  }
+  if (!ok || !M['src/entities/registry.js'].BUILDERS[built.id]) return;
+  disposeCurrent();
+  // Textures are cached by name for the whole page, so drop them: without this a
+  // skin-colour change would never show up, and the brush strokes the file replays
+  // would be laid on top of the ones already in the canvas.
+  clearTextures();
+  if (reseed) seed += 1;
+  let model;
+  try {
+    model = M['src/entities/models.js'].buildModel(built.id, new RNG(seed * 7919 + 13));
+  } catch (e) {
+    $('problems').innerHTML = '<p class="warn">The model could not be built: ' + esc(e && e.message) + '</p>';
+    return;
+  }
+  model.root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; o.frustumCulled = false; } });
+  const holder = new THREE.Group();
+  holder.add(model.root);
+  scene.add(holder);
+  current = {
+    id: built.id, model, holder,
+    st: { speed: 0, phase: Math.random() * 6, t: Math.random() * 10, look: 0, attack: 0, chasing: false,
+      crawl: false, ceiling: 3.2, prox: 0, stride: num('stride'), pitch: $('kind').value === 'quad' ? 1.18 : 0 },
+  };
+  for (let i = 0; i < 8; i++) { try { model.animate(current.st, 0.016); } catch (e) { break; } }
+  setLight(model.mats, 0.34, 0.34, 0.34);
+  const h = model.height || 1.8;
+  if (needFrame || !lastFrameH || Math.abs(h - lastFrameH) / lastFrameH > 0.18) { frameView(); cam.dist = cam.want; needFrame = false; }
+  applyShading();
+  buildRuler();
+  refreshHighlight();
+  $('seedbadge').textContent = 'seed ' + seed;
+}
+
+let last = performance.now(), fpsT = 0, frames = 0;
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (!renderer) return;
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const canvas = $('c');
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (w && h && (canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio()))) {
+    renderer.setSize(w, h, false);
+    persp.aspect = w / Math.max(1, h);
+    persp.updateProjectionMatrix();
+  }
+  GLOBAL_UNIFORMS.uTime.value += dt;
+  if (current) {
+    const pose = $('pose').value;
+    const walk = Math.max(num('speed'), 0.6), run = Math.max(num('chase'), walk * 1.6);
+    const target = pose === 'idle' ? 0 : pose === 'chase' ? run : walk;
+    const play = VS.play ? 1 : 0;
+    const sp = parseFloat($('animspeed').value);
+    current.st.speed += (target - current.st.speed) * Math.min(1, dt * 4) * play;
+    current.st.chasing = pose === 'chase';
+    current.st.stride = num('stride');
+    try {
+      current.model.animate(current.st, play ? dt * (isNaN(sp) ? 1 : sp) : 0.00001);
+    } catch (e) {
+      current = null;
+      $('problems').innerHTML = '<p class="warn">The animation threw an error: ' + esc(e && e.message) + '</p>';
+      return;
+    }
+  }
+  if (VS.turn && !drag) cam.yaw += dt * 0.5;
+  cam.dist += (cam.want - cam.dist) * Math.min(1, dt * 8);
+  placeCamera(w, h);
+  key.target.position.copy(cam.target);
+  key.target.updateMatrixWorld();
+  if (flash.visible) { flash.position.copy(camera.position); flash.target.position.copy(cam.target); flash.target.updateMatrixWorld(); }
+  if (hiBox.visible && hiBox.userData.region) { const b = regionBox(hiBox.userData.region); if (b) hiBox.box.copy(b); }
+  hoverTick();
+  renderer.render(scene, camera);
+  drawGizmo();
+  frames++; fpsT += dt;
+  if (fpsT > 0.5) {
+    const tris = renderer.info && renderer.info.render ? renderer.info.render.triangles : 0;
+    $('readout').textContent = (frames / fpsT).toFixed(0) + ' fps' + (current ? ' · ' + current.st.speed.toFixed(2) + ' m/s' : '') + (tris ? ' · ' + (tris / 1000).toFixed(1) + 'k tris' : '');
+    fpsT = 0; frames = 0;
+  }
+}
+function placeCamera(w, h) {
+  const cp = Math.cos(cam.pitch);
+  camera.position.set(cam.target.x + Math.sin(cam.yaw) * cp * cam.dist, Math.max(0.05, cam.target.y + Math.sin(cam.pitch) * cam.dist), cam.target.z + Math.cos(cam.yaw) * cp * cam.dist);
+  if (VS.ortho) {
+    const hh = cam.dist * Math.tan((persp.fov * Math.PI) / 360), aspect = (w || 1) / Math.max(1, h || 1);
+    ortho.left = -hh * aspect; ortho.right = hh * aspect; ortho.top = hh; ortho.bottom = -hh;
+    ortho.updateProjectionMatrix();
+  }
+  camera.lookAt(cam.target);
+  camera.updateMatrixWorld();
+}
+function screenshot() {
+  if (!renderer) return;
+  renderer.render(scene, camera);
+  const a = document.createElement('a');
+  a.href = $('c').toDataURL('image/png');
+  a.download = entityId() + '.png';
+  a.click();
+  toast('Saved ' + a.download);
+}
+
+// ------------------------------------------------------------------ outliner + selection
+let selNode = 'root';
+function regionBox(kind) {
+  if (!current) return null;
+  const root = current.model.root;
+  const full = new THREE.Box3().setFromObject(root);
+  if (full.isEmpty()) return null;
+  if (kind === 'body' || kind === 'root') return full;
+  const hgt = full.max.y - full.min.y;
+  const b = full.clone();
+  if (kind === 'head') {
+    const ey = current.model.eyeY || full.max.y * 0.9;
+    b.min.y = ey - hgt * 0.17; b.max.y = Math.min(full.max.y + 0.02, ey + hgt * 0.15);
+    const half = hgt * 0.17;               // a head is not as wide as the whole creature
+    b.min.x = Math.max(full.min.x, -half); b.max.x = Math.min(full.max.x, half);
+    if ($('kind').value !== 'quad') { b.min.z = Math.max(full.min.z, -half); b.max.z = Math.min(full.max.z, half); }
+    return b;
+  }
+  if (kind === 'legs') { b.max.y = full.min.y + hgt * 0.5; return b; }
+  const bx = new THREE.Box3(); let any = false;
+  root.traverse((o) => { if (o.isMesh && roleOfMesh(o) === kind) { bx.expandByObject(o); any = true; } });
+  return any && !bx.isEmpty() ? bx : full;
+}
+function refreshHighlight() {
+  if (!hiBox) return;
+  const region = hiBox.userData.region;
+  hiBox.visible = !!region && !!current;
+}
+function setHighlight(region) {
+  if (!hiBox) return;
+  hiBox.userData.region = region;
+  if (region) { const b = regionBox(region); if (b) hiBox.box.copy(b); }
+  refreshHighlight();
+}
+function focusOn(kind) {
+  if (!current) return;
+  const h = Math.max(current.model.height || 1.8, 0.5);
+  if (kind === 'head') { cam.target.set(0, current.model.eyeY || h * 0.9, 0); cam.want = clampRange(h * 0.55 + 0.5, 0.8, 8); }
+  else if (kind === 'legs') { cam.target.set(0, h * 0.25, 0); cam.want = clampRange(h * 1.3 + 0.6, 1.2, 12); }
+  else { cam.target.set(0, h * 0.5, 0); cam.want = clampRange(Math.max(h, (current.model.radius || 0.4) * 2.2) * 1.75 + 0.9, 1.4, 30); }
+}
+
+function outlineNodes() {
+  const v = getValues();
+  const eyesN = 2 + (parseInt(v.eyes, 10) || 0), hornsN = parseInt(v.horns, 10) || 0;
+  const clothes = !!v.clothes;
+  return [
+    { id: 'root', d: 0, label: v.name || 'Entity', col: '#e9c46a', tab: 'behaviour', focus: 'body', region: null },
+    { id: 'body', d: 1, label: 'Body - ' + (v.kind === 'quad' ? 'quadruped' : 'biped'), col: '#7aa0d8', tab: 'body', focus: 'body', region: 'body' },
+    { id: 'head', d: 2, label: 'Head', col: '#7aa0d8', tab: 'body', focus: 'head', region: 'head' },
+    { id: 'eyes', d: 3, label: 'Eyes', cnt: '×' + eyesN, col: '#d8d08a', tab: 'face', focus: 'head', region: 'head' },
+    { id: 'brow', d: 3, label: 'Brow ridge', col: '#d8d08a', tab: 'face', focus: 'head', region: 'head', dim: !(parseFloat(v.brow) > 0) },
+    { id: 'jaw', d: 3, label: 'Jaw / muzzle', col: '#d8d08a', tab: 'face', focus: 'head', region: 'head', dim: v.jaw === 'none' },
+    { id: 'teeth', d: 3, label: 'Teeth', cnt: v.teeth === 'none' ? '' : v.teeth, col: '#d8d08a', tab: 'face', focus: 'head', region: 'head', dim: v.teeth === 'none' },
+    { id: 'horns', d: 3, label: 'Horns', cnt: hornsN ? '×' + hornsN : '', col: '#d8d08a', tab: 'body', focus: 'head', region: 'head', dim: !hornsN, eye: 'horns' },
+    { id: 'torso', d: 2, label: 'Torso and arms', col: '#7aa0d8', tab: 'body', focus: 'body', region: 'body' },
+    { id: 'clothes', d: 3, label: 'Clothes', col: '#8fb88a', tab: 'surface', focus: 'body', region: 'top', dim: !clothes, eye: 'clothes' },
+    { id: 'claws', d: 3, label: 'Claws', col: '#8fb88a', tab: 'body', focus: 'body', region: 'body', dim: !v.claws, eye: 'claws' },
+    { id: 'legs', d: 2, label: 'Legs and feet', col: '#7aa0d8', tab: 'body', focus: 'legs', region: 'legs' },
+    { id: 'mats', d: 1, label: 'Materials', col: '#c490d8', tab: 'surface', focus: 'body', region: null },
+    { id: 'm-skin', d: 2, label: 'Skin', col: v.skinbase, tab: 'surface', focus: 'body', region: 'skin' },
+    { id: 'm-top', d: 2, label: 'Top', col: v.top, tab: 'surface', focus: 'body', region: 'top', dim: !clothes },
+    { id: 'm-bottom', d: 2, label: 'Bottom', col: v.bottom, tab: 'surface', focus: 'legs', region: 'bottom' },
+    { id: 'beh', d: 1, label: 'Behaviour', cnt: flagList().length ? flagList().length + ' flags' : '', col: '#d89a6a', tab: 'behaviour', focus: null, region: null },
+  ];
+}
+function renderOutliner() {
+  const el = $('outliner'); if (!el) return;
+  el.innerHTML = outlineNodes().map((n) =>
+    '<div class="row-o' + (n.id === selNode ? ' sel' : '') + (n.dim ? ' dim' : '') + '" data-node="' + n.id + '" style="padding-left:' + (8 + n.d * 14) + 'px">' +
+    '<span class="ico" style="background:' + (n.col || '#888') + '"></span><span class="nm">' + esc(n.label) + '</span>' +
+    (n.cnt ? '<span class="cnt">' + esc(n.cnt) + '</span>' : '') +
+    (n.eye ? '<span class="eye' + (n.dim ? ' off' : '') + '" data-eye="' + n.eye + '" title="Toggle">◉</span>' : '') + '</div>').join('');
+}
+function selectNode(id) {
+  const n = outlineNodes().find((x) => x.id === id);
+  if (!n) return;
+  selNode = id;
+  if (n.tab) showTab(n.tab);
+  if (n.focus) focusOn(n.focus);
+  setHighlight(n.region);
+  renderOutliner();
+}
+function toggleEye(what) {
+  if (what === 'horns') { const h = $('horns'); h.value = (parseInt(h.value, 10) || 0) > 0 ? 0 : 2; }
+  else { const c = $(what); c.checked = !c.checked; }
+  scheduleUpdate(true);
+}
+
+// ------------------------------------------------------------------ tabs, folds
+function buildProps() {
+  const tabs = $('tabs'), body = $('tabbody');
+  let th = '', bh = '';
+  const list = [...TABS.slice(0, 3), { id: 'paint', icon: 'paint', label: 'Paint' }, TABS[3], { id: 'export', icon: 'export', label: 'Export' }];
+  for (const t of list) {
+    th += '<button type="button" class="tab" data-tab="' + t.id + '" title="' + t.label + '" data-tip="' + t.label + '">' + ICON[t.icon] + '</button>';
+    if (t.id === 'paint') bh += '<div class="tabpane" id="pane_paint">' + paintHTML() + '</div>';
+    else if (t.id === 'export') bh += '<div class="tabpane" id="pane_export">' + exportHTML() + '</div>';
+    else bh += '<div class="tabpane" id="pane_' + t.id + '"><div class="tabtitle">' + esc(t.label) + '</div><div class="tabsub">' + esc(t.sub) + '</div>' + t.groups.map(groupHTML).join('') + '</div>';
+  }
+  tabs.innerHTML = th;
+  body.innerHTML = bh;
+  const cls = $('cls');
+  for (const c of CLASSES) { const o = document.createElement('option'); o.value = c; o.textContent = c; cls.appendChild(o); }
+  cls.value = CLASSES.includes('Hostile') ? 'Hostile' : CLASSES[0];
+}
+let curTab = 'body';
+function showTab(id) {
+  curTab = id;
+  for (const b of document.querySelectorAll('.tab')) b.classList.toggle('on', b.dataset.tab === id);
+  for (const p of document.querySelectorAll('.tabpane')) p.classList.toggle('on', p.id === 'pane_' + id);
+}
+
+// ------------------------------------------------------------------ option bar + timeline
+function buildOptbar() {
+  $('optbar').innerHTML = '<span class="tname" id="tname">Orbit / Select</span><span class="hintline" id="hintline"></span>' +
+    '<div class="opts" id="paintopts" style="display:none">' + BRUSH_FIELDS.map(fieldHTML).join('') + '</div>';
+}
+function setPose(p, quiet) {
+  $('pose').value = p;
+  for (const b of document.querySelectorAll('#poseseg button')) b.classList.toggle('on', b.dataset.pose === p);
+  if (!quiet) toast('Pose: ' + p);
+}
+function buildTimeline() {
+  $('poseseg').innerHTML = [['idle', 'Idle'], ['walk', 'Walk'], ['chase', 'Chase']].map(([id, l]) => '<button type="button" data-pose="' + id + '">' + l + '</button>').join('');
+  $('speedwrap').innerHTML = fieldHTML(SPEED_FIELD);
+}
+function setPlay(on) {
+  VS.play = on;
+  $('playbtn').innerHTML = on ? '&#10074;&#10074; Pause' : '&#9654; Play';
+}
+
+// ------------------------------------------------------------------ viewport header
+function buildViewHeader() {
+  $('vshade').innerHTML = [['material', 'Material'], ['clay', 'Clay'], ['wire', 'Wire']].map(([id, l]) => '<button type="button" data-shade="' + id + '" title="Shading (Z cycles)">' + l + '</button>').join('');
+  $('vover').innerHTML = [['grid', 'Grid'], ['floor', 'Floor'], ['ruler', 'Ruler'], ['human', 'Human'], ['shadows', 'Shadows'], ['turn', 'Turntable']].map(([id, l]) => '<button type="button" data-over="' + id + '">' + l + '</button>').join('');
+  $('vcam').innerHTML = '<button type="button" data-cam="persp">Persp</button><button type="button" data-cam="ortho">Ortho</button><button type="button" data-cam="frame" title="Frame the creature (F)">Frame</button><button type="button" data-cam="shot" title="Save a PNG">Photo</button>';
+  $('vlook').innerHTML = '<select id="lightsel" title="Lighting"><option value="hallway">Light: hallway</option><option value="studio">Light: studio</option><option value="dark">Light: flashlight</option></select>' +
+    '<select id="bgsel" title="Background"><option value="dark">Bg: dark</option><option value="grey">Bg: grey</option><option value="light">Bg: light</option></select>';
+  $('lightsel').value = VS.light; $('bgsel').value = VS.bg;
+  refreshViewButtons();
+}
+function refreshViewButtons() {
+  for (const b of document.querySelectorAll('[data-shade]')) b.classList.toggle('on', b.dataset.shade === VS.shading);
+  for (const b of document.querySelectorAll('[data-over]')) b.classList.toggle('on', !!VS[b.dataset.over]);
+  for (const b of document.querySelectorAll('[data-cam]')) { if (b.dataset.cam === 'persp') b.classList.toggle('on', !VS.ortho); if (b.dataset.cam === 'ortho') b.classList.toggle('on', VS.ortho); }
+}
+
+// ------------------------------------------------------------------ menus
+const closeAll = () => { for (const d of document.querySelectorAll('.dd')) d.remove(); for (const b of document.querySelectorAll('.mbtn')) b.classList.remove('open'); };
+function menuDefs() {
+  const ck = (f) => () => !!f();
+  return [
+    { label: 'File', items: [
+      { l: 'New creature', fn: newCreature },
+      { l: 'Open .js...', k: 'Ctrl+O', fn: () => $('openfile').click() },
+      { sep: 1 },
+      { l: 'Download .js', k: 'Ctrl+S', fn: downloadFile },
+      { l: 'Copy the file', fn: copyFile },
+      { l: 'Copy the loader line', fn: () => { navigator.clipboard.writeText($('line1').textContent); toast('Loader line copied'); } },
+      { l: 'Copy the id line', fn: () => { navigator.clipboard.writeText($('idline').textContent); toast('Id line copied'); } },
+      { sep: 1 },
+      { l: 'Save a PNG of the viewport', fn: screenshot },
+    ] },
+    { label: 'Edit', items: [
+      { l: 'Undo', k: 'Ctrl+Z', fn: undo },
+      { l: 'Redo', k: 'Ctrl+Shift+Z', fn: redo },
+      { sep: 1 },
+      { l: 'New random bits', k: 'R', fn: () => { update(true); snapshot(); } },
+      { l: 'Rebuild', fn: () => update(false) },
+      { l: 'Clear all paint', fn: clearPaint },
+    ] },
+    { label: 'View', items: [
+      { l: 'Front', k: '1', fn: () => setView('front') }, { l: 'Back', k: 'Ctrl+1', fn: () => setView('back') },
+      { l: 'Left', k: '3', fn: () => setView('left') }, { l: 'Right', k: 'Ctrl+3', fn: () => setView('right') },
+      { l: 'Top', k: '7', fn: () => setView('top') },
+      { sep: 1 },
+      { l: 'Perspective / orthographic', k: '5', fn: () => setOrtho(!VS.ortho) },
+      { l: 'Frame the creature', k: 'F', fn: () => { frameView(); } },
+      { sep: 1 },
+      { l: 'Grid', k: 'G', check: ck(() => VS.grid), fn: () => toggleOver('grid') },
+      { l: 'Floor', check: ck(() => VS.floor), fn: () => toggleOver('floor') },
+      { l: 'Height ruler', check: ck(() => VS.ruler), fn: () => toggleOver('ruler') },
+      { l: 'Reference human', check: ck(() => VS.human), fn: () => toggleOver('human') },
+      { l: 'Shadows', check: ck(() => VS.shadows), fn: () => toggleOver('shadows') },
+      { l: 'Turntable', k: 'T', check: ck(() => VS.turn), fn: () => toggleOver('turn') },
+      { sep: 1 },
+      { l: 'Shading: cycle', k: 'Z', fn: cycleShading },
+    ] },
+    { label: 'Help', items: [
+      { l: 'Keyboard shortcuts', k: '?', fn: showHelp },
+      { l: 'About the studio', fn: showAbout },
+    ] },
+  ];
+}
+function toggleOver(k) { VS[k] = !VS[k]; applyOverlays(); refreshViewButtons(); }
+function cycleShading() { setShading({ material: 'clay', clay: 'wire', wire: 'material' }[VS.shading] || 'material'); }
+function buildMenus() {
+  const host = $('menus');
+  host.style.display = 'flex';
+  host.innerHTML = '';
+  menuDefs().forEach((m, i) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'mbtn'; b.textContent = m.label; b.dataset.menu = String(i);
+    b.addEventListener('click', (e) => { e.stopPropagation(); openMenu(i, b); });
+    b.addEventListener('mouseenter', () => { if (document.querySelector('.dd')) openMenu(i, b); });
+    host.appendChild(b);
+  });
+}
+function openMenu(i, btn) {
+  const was = btn.classList.contains('open');
+  closeAll();
+  if (was) return;
+  btn.classList.add('open');
+  const dd = document.createElement('div');
+  dd.className = 'dd';
+  const bar = $('menubar').getBoundingClientRect(), br = btn.getBoundingClientRect();
+  dd.style.left = Math.max(0, br.left - bar.left) + 'px';
+  for (const it of menuDefs()[i].items) {
+    if (it.sep) { const s = document.createElement('div'); s.className = 'sep'; dd.appendChild(s); continue; }
+    const r = document.createElement('div');
+    r.className = 'it';
+    r.innerHTML = '<span class="ck">' + (it.check && it.check() ? '✓' : '') + '</span><span>' + esc(it.l) + '</span><span class="k">' + esc(it.k || '') + '</span>';
+    r.addEventListener('click', (e) => { e.stopPropagation(); closeAll(); it.fn(); });
+    dd.appendChild(r);
+  }
+  $('menubar').appendChild(dd);
+}
+
+function showModal(html) { $('modalcard').innerHTML = html; $('modal').classList.add('on'); }
+function hideModal() { $('modal').classList.remove('on'); }
+function showHelp() {
+  const rows = [['V / B / A / E / I / U', 'Orbit-select, Brush, Spray (airbrush), Eraser, Eyedropper, Fill'], ['[  ]', 'Brush smaller / bigger'], ['Drag', 'Orbit (miss the model with a paint tool and it orbits too)'], ['Shift+drag / middle', 'Pan'], ['Ctrl+drag / wheel', 'Zoom'], ['Right button', 'Always orbits, even while painting'],
+    ['F  /  double-click', 'Frame the creature'], ['1  3  7  Ctrl+1  Ctrl+3', 'Front, left, top, back, right'], ['5', 'Perspective / orthographic'], ['Z', 'Cycle shading: material, clay, wire'], ['G  T', 'Toggle grid / turntable'], ['Space', 'Play / pause the animation'], ['R', 'New random bits (another individual of the same species)'],
+    ['Ctrl+Z / Ctrl+Y', 'Undo / redo - sliders and paint alike'], ['Ctrl+S / Ctrl+O', 'Download .js / open a studio-written .js'], ['Double-click a slider', 'Type an exact value'], ['?', 'This list']];
+  showModal('<h3>Keyboard and mouse</h3><table>' + rows.map((r) => '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>').join('') + '</table><div class="btnrow"><button type="button" class="btn pri" id="modalok">Close</button></div>');
+  $('modalok').addEventListener('click', hideModal);
+}
+function showAbout() {
+  showModal('<h3>Labyrinth Box - Entity Studio</h3><p class="note">Builds a creature out of the same rig, skin and cloth generators the game uses and writes one self-contained <code>entities/&lt;id&gt;.js</code> file. ' +
+    'The viewport is live: every control rebuilds the model, and the paint tools write into the real textures.</p><p class="note">The file ends with a comment holding the studio\'s state, so File &gt; Open .js continues exactly where you stopped. Your last session is also kept in this browser.</p>' +
+    '<div class="btnrow"><button type="button" class="btn pri" id="modalok">Close</button></div>');
+  $('modalok').addEventListener('click', hideModal);
+}
+
+// ------------------------------------------------------------------ actions
+function downloadFile() {
+  const built = buildFile();
+  const blob = new Blob([built.text], { type: 'text/javascript' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = built.fname;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Saved ' + built.fname);
+}
+function copyFile() { navigator.clipboard.writeText($('file').textContent); toast('File copied'); flashButton('copy', 'Copied', 'Copy the file'); }
+function clearPaint() { painting = []; stroke = null; paintRev++; update(false); snapshot(); renderPaintInfo(); toast('Paint cleared'); }
+function newCreature() {
+  applyPreset(PRESETS[1]);
+  hist.stack = []; hist.i = -1; snapshot();
+  toast('New creature');
+}
+function openFileText(text) {
+  const m = /\/\* studio-state ([\s\S]*) \*\/\s*$/.exec(text);
+  if (!m) { toast('That file has no studio state - only files written by this studio can be reopened'); return; }
+  try { applyState(JSON.parse(m[1].replace(/\*\\\//g, '*/'))); toast('Opened'); } catch (e) { toast('Could not read the studio state: ' + e.message); }
+}
+
+// ------------------------------------------------------------------ keyboard
+function onKey(e) {
+  const t = e.target;
+  const typing = t && (t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (t.tagName === 'INPUT' && !/^(range|checkbox|color|button|hidden)$/.test(t.type || '')));
+  const k = (e.key || '').toLowerCase(), mod = e.ctrlKey || e.metaKey;
+  if (k === 'escape') { closeAll(); hideModal(); return; }
+  if (mod && k === 'z') { if (typing && t.tagName === 'TEXTAREA') return; e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (mod && k === 'y') { e.preventDefault(); redo(); return; }
+  if (mod && k === 's') { e.preventDefault(); downloadFile(); return; }
+  if (mod && k === 'o') { e.preventDefault(); $('openfile').click(); return; }
+  if (typing || e.altKey) return;
+  const map = { v: 'select', b: 'brush', a: 'spray', e: 'erase', i: 'pick', u: 'fill' };
+  if (!mod && map[k]) { setTool(map[k]); return; }
+  switch (k) {
+    case 'f': case 'home': frameView(); break;
+    case 'g': toggleOver('grid'); break;
+    case 't': toggleOver('turn'); break;
+    case 'z': if (!mod) cycleShading(); break;
+    case ' ': e.preventDefault(); setPlay(!VS.play); break;
+    case 'r': update(true); snapshot(); break;
+    case '1': setView(mod ? 'back' : 'front'); e.preventDefault(); break;
+    case '3': setView(mod ? 'right' : 'left'); e.preventDefault(); break;
+    case '7': setView('top'); break;
+    case '5': setOrtho(!VS.ortho); break;
+    case '[': case ']': {
+      const el = $('brushsize'); const f = k === ']' ? 1.25 : 0.8;
+      el.value = clampRange(parseFloat(el.value) * f, parseFloat(el.min), parseFloat(el.max)); syncField(el); break;
+    }
+    case '?': showHelp(); break;
+  }
+}
+
+// ------------------------------------------------------------------ presets + the file
+const presetBox = $('presets');
+PRESETS.forEach((p) => {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = p.name;
+  b.title = p.desc || p.name;
+  b.addEventListener('click', () => applyPreset(p));
+  presetBox.appendChild(b);
+});
+function applyPreset(p) {
+  const map = { name2: 'name' };
+  // the detail controls are per-creature too: reset them first so a preset that
+  // says nothing about the face gets a neutral one instead of the last one's teeth.
+  for (const k of Object.keys(DETAIL_DEFAULTS)) {
+    const el = $(k);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!DETAIL_DEFAULTS[k]; else el.value = DETAIL_DEFAULTS[k];
+  }
+  for (const k of Object.keys(p)) {
+    if (k === 'flags' || k === 'name') continue;
+    const el = $(map[k] || k);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!p[k];
+    else el.value = p[k];
+  }
+  for (const [id] of FLAGS) $('flag_' + id).checked = (p.flags || []).includes(id);
+  $('filename').value = p.id;
+  $('filename').dataset.touched = '1';
+  // a preset is a different creature wearing different textures, so its paint goes too
+  painting = [];
+  stroke = null; paintRev++;
+  renderPaintInfo();
+  syncAll();
+  needFrame = true;
+  update(false, true);
+  if (renderer) rebuild(false);
+  snapshot();
+}
+
+let updT = 0, snapT = 0;
+function scheduleUpdate(immediate) {
+  clearTimeout(updT); clearTimeout(snapT);
+  updT = setTimeout(() => update(false), immediate ? 0 : 200);
+  snapT = setTimeout(snapshot, immediate ? 60 : 700);
+}
+
+function update(reseed, quiet) {
+  const built = buildFile();
+  $('file').textContent = built.text;
+  $('path1').textContent = 'entities/' + built.fname;
+  $('line1').textContent = "    '" + built.fname + "',";
+  $('idline').textContent = '    "' + built.id + '",';
+  const probs = problems(built);
+  $('problems').innerHTML = probs.length
+    ? '<p class="warn">' + probs.length + ' thing(s) to check:</p><ul class="plist warn">' + probs.map((p) => '<li>' + esc(p) + '</li>').join('') + '</ul>'
+    : '<p class="ok">Nothing in the way of saving it.</p>';
+  const chip = $('chip');
+  chip.textContent = probs.length ? probs.length + ' to check' : 'ready to save';
+  chip.className = 'chip ' + (probs.length ? 'bad' : 'good');
+  $('vinfo').textContent = built.name + '  ·  entities/' + built.fname + '  ·  ' + ($('kind').value === 'quad' ? 'quadruped' : 'biped') + ' ' + num('height').toFixed(2) + ' m';
+  if (!quiet) rebuild(reseed);
+  renderOutliner();
+  renderPaintInfo();
+}
+
+// ------------------------------------------------------------------ wiring
+function wire() {
+  // one delegated listener per event type: every control sits under the document
+  document.addEventListener('input', (e) => {
+    const t = e.target;
+    if (!t || !t.id) return;
+    syncField(t);
+    if (/^brush/.test(t.id)) { if (t.id === 'brushcolor') pushRecent(t.value); saveBrush(); return; }
+    if (t.id === 'animspeed') return;
+    if (t.id === 'id' && !$('filename').dataset.touched) $('filename').value = ($('id').value.trim() || 'my-entity');
+    if (t.id === 'filename') $('filename').dataset.touched = '1';
+    scheduleUpdate();
+  });
+  document.addEventListener('click', (e) => {
+    const t = e.target;
+    if (!t) return;
+    if (!(t.closest && t.closest('.dd'))) closeAll();
+    const up = (sel) => (t.closest ? t.closest(sel) : null);
+    let el;
+    if ((el = up('.tab'))) return showTab(el.dataset.tab);
+    if ((el = up('[data-fold]'))) { el.classList.toggle('shut'); const b = el.nextElementSibling; if (b) b.classList.toggle('shut'); return; }
+    if ((el = up('[data-eye]'))) { e.stopPropagation(); return toggleEye(el.dataset.eye); }
+    if ((el = up('[data-node]'))) return selectNode(el.dataset.node);
+    if ((el = up('[data-shade]'))) return setShading(el.dataset.shade);
+    if ((el = up('[data-over]'))) return toggleOver(el.dataset.over);
+    if ((el = up('[data-cam]'))) {
+      const c = el.dataset.cam;
+      if (c === 'persp') setOrtho(false); else if (c === 'ortho') setOrtho(true); else if (c === 'frame') frameView(); else if (c === 'shot') screenshot();
+      return;
+    }
+    if ((el = up('[data-pose]'))) return setPose(el.dataset.pose);
+    if ((el = up('#palette i, #recent i'))) return setBrushColour(el.dataset.c);
+    if ((el = up('[data-clear]'))) {
+      painting = painting.filter((s) => s.role !== el.dataset.clear); stroke = null; paintRev++; update(false); snapshot(); return;
+    }
+    if ((el = up('.panelhead')) && el.dataset.fold) { el.classList.toggle('shut'); const b = $(el.dataset.fold); if (b) b.classList.toggle('shut'); }
+  });
+  document.addEventListener('dblclick', (e) => {
+    const s = e.target && e.target.closest ? e.target.closest('.fld.slider') : null;
+    if (!s) return;
+    const r = s.querySelector('input[type=range]');
+    const box = document.createElement('input');
+    box.type = 'text'; box.className = 'edit'; box.value = r.value;
+    s.appendChild(box); box.focus(); box.select && box.select();
+    let closed = false;
+    const done = (ok) => {
+      if (closed) return;
+      closed = true;
+      if (ok) {
+        const v = parseFloat(box.value);
+        if (!isNaN(v)) { r.value = clampRange(v, parseFloat(r.min), parseFloat(r.max)); r.dispatchEvent(new Event('input', { bubbles: true })); }
+      }
+      box.remove();
+    };
+    box.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') done(true); else if (ev.key === 'Escape') done(false); ev.stopPropagation(); });
+    box.addEventListener('blur', () => done(true));
+  });
+  document.addEventListener('mouseover', (e) => {
+    let t = e.target;
+    while (t && !(t.dataset && t.dataset.tip)) t = t.parentNode;
+    const tip = $('tip');
+    if (tip) tip.textContent = t ? t.dataset.tip : 'Hover a control for a hint. Press ? for the shortcut list.';
+  });
+  window.addEventListener('keydown', onKey);
+  window.addEventListener('resize', closeAll);
+
+  $('dl').addEventListener('click', downloadFile);
+  $('dl2').addEventListener('click', downloadFile);
+  $('copy').addEventListener('click', copyFile);
+  $('copyline').addEventListener('click', () => { navigator.clipboard.writeText($('line1').textContent); flashButton('copyline', 'Copied', 'Copy the loader line'); });
+  $('copyid').addEventListener('click', () => { navigator.clipboard.writeText($('idline').textContent); flashButton('copyid', 'Copied', 'Copy the id line'); });
+  $('openbtn').addEventListener('click', () => $('openfile').click());
+  $('openfile').addEventListener('change', () => {
+    const f = $('openfile').files && $('openfile').files[0];
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => openFileText(String(rd.result));
+    rd.readAsText(f);
+    $('openfile').value = '';
+  });
+  $('reseed').addEventListener('click', () => { update(true); snapshot(); });
+  $('rebuild').addEventListener('click', () => update(false));
+  $('playbtn').addEventListener('click', () => setPlay(!VS.play));
+  $('chip').addEventListener('click', () => showTab('export'));
+  $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) hideModal(); });
+  $('paintundo').addEventListener('click', () => {
+    if (!painting.length) return;
+    painting.pop(); stroke = null; paintRev++; update(false); snapshot();
+  });
+  $('paintclear').addEventListener('click', clearPaint);
+  $('lightsel').addEventListener('change', () => setLighting($('lightsel').value));
+  $('bgsel').addEventListener('change', () => setBackground($('bgsel').value));
+}
+function saveBrush() {
+  lsSet('lb.es.brush', JSON.stringify(Object.fromEntries(BRUSH_FIELDS.map((f) => [f.id, $(f.id).value]))));
+}
+function loadBrush() {
+  try {
+    const b = JSON.parse(lsGet('lb.es.brush') || '{}');
+    for (const f of BRUSH_FIELDS) if (b[f.id] !== undefined && $(f.id)) $(f.id).value = b[f.id];
+  } catch (e) { /* defaults */ }
+}
+
 // A creature file that loaded but is missing from the studios' pick list can never
-// be spawned by a level. This catches a file saved without finishing the steps above.
+// be spawned by a level. This catches a file saved without finishing the steps.
 function wiringProblems() {
   const picked = new Set(GAME.entities);
   return Object.keys(ED).filter((id) => !ED[id].phobia && !picked.has(id));
@@ -1072,72 +2138,36 @@ function renderWiring() {
     return;
   }
   box.innerHTML = '<p class="warn">' + missing.length + ' loaded creature(s) are missing from the studio pick lists, so a level cannot spawn them: <code>' + missing.join(', ') + '</code></p>' +
-    '<p class="hint">Add each id to the <code>"entities"</code> array of <code>GAME</code> in other/level-studio.html and other/entity-studio.html.</p>';
+    '<p class="note">Add each id to the <code>"entities"</code> array of <code>GAME</code> in other/level-studio.html and other/entity-studio.html.</p>';
 }
 
-function update(reseed, quiet) {
-  const built = buildFile();
-  $('file').textContent = built.text;
-  $('path1').textContent = 'entities/' + built.fname;
-  $('line1').textContent = "    '" + built.fname + "',";
-  $('idline').textContent = '    "' + built.id + '",';
-  const probs = problems(built);
-  $('problems').innerHTML = probs.length
-    ? '<p class="warn">' + probs.length + ' thing(s) to check:</p><ul class="warn">' + probs.map((p) => '<li>' + p + '</li>').join('') + '</ul>'
-    : '<p class="ok">Nothing in the way of saving it.</p>';
-  if (!quiet) rebuild(reseed);
-  else $('problems').innerHTML += '<p class="hint">Press a slider or Rebuild if the preview does not follow along.</p>';
-}
-
-// ------------------------------------------------------------------ wiring
-$('dl').addEventListener('click', () => {
-  const built = buildFile();
-  const blob = new Blob([built.text], { type: 'text/javascript' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = built.fname;
-  a.click();
-  URL.revokeObjectURL(a.href);
-});
-$('copy').addEventListener('click', () => {
-  navigator.clipboard.writeText($('file').textContent);
-  $('copy').textContent = 'Copied';
-  setTimeout(() => { $('copy').textContent = 'Copy the file'; }, 1200);
-});
-$('copyline').addEventListener('click', () => navigator.clipboard.writeText($('line1').textContent));
-$('copyid').addEventListener('click', () => {
-  navigator.clipboard.writeText($('idline').textContent);
-  $('copyid').textContent = 'Copied';
-  setTimeout(() => { $('copyid').textContent = 'Copy the id line'; }, 1200);
-});
-$('reseed').addEventListener('click', () => update(true));
-$('rebuild').addEventListener('click', () => update(false));
-$('paintmode').addEventListener('change', () => {
-  $('c').classList.toggle('painting', $('paintmode').checked);
-  if ($('paintmode').checked && $('pose').value !== 'idle') $('pose').value = 'idle';
-});
-$('paintundo').addEventListener('click', () => { painting.pop(); stroke = null; update(false); renderPaintInfo(); });
-$('paintclear').addEventListener('click', () => { painting = []; stroke = null; update(false); renderPaintInfo(); });
-
-$('id').addEventListener('input', () => {
-  if (!$('filename').dataset.touched) $('filename').value = ($('id').value.trim() || 'my-entity');
-});
-$('filename').addEventListener('input', () => { $('filename').dataset.touched = '1'; });
-let timer = null;
-document.querySelectorAll('input, select, textarea').forEach((el) => {
-  // the brush settings change the paint, never the file, so they do not rebuild it
-  if (/^brush/.test(el.id)) return;
-  el.addEventListener('input', () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => update(false), 260);
-  });
-});
-
+// ------------------------------------------------------------------ start
+buildToolbox();
+buildOptbar();
+buildProps();
+buildTimeline();
+buildViewHeader();
+buildMenus();
+loadBrush();
 initPreview();
+wire();
+setTool('select');
+showTab('body');
+setPose('walk', true);
+setPlay(true);
+syncAll();
 renderWiring();
-renderPaintInfo();
-applyPreset(PRESETS[1]);
-update(false); // build the preset on load, so the preview is never a blank canvas
+renderRecent();
+renderHistory();
+(function start() {
+  let restored = false;
+  const saved = lsGet('lb.es.autosave');
+  if (saved) {
+    try { applyState(JSON.parse(saved)); restored = true; toast('Restored your last session'); } catch (e) { restored = false; }
+  }
+  if (!restored) applyPreset(PRESETS[1]);
+  if (!hist.stack.length) snapshot();
+})();
 requestAnimationFrame(loop);
 </script>
 </body>
